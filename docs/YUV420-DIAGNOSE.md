@@ -46,6 +46,8 @@ Die Diagnose ist gegen unveränderte 615.78.08-Quellen und zusätzlich nach `615
 
 ## Bauen und Installieren unter macOS
 
+Die ausführliche Untersuchung des öffentlichen Buildpfads, der Binärkompatibilität zu 2.5.4 und des Rückwegs auf einem separaten Testsystem steht in [NVRM-DIAGNOSE-BUILD.md](NVRM-DIAGNOSE-BUILD.md). Der vollständige NVRM-Build ist aus den vorliegenden öffentlichen Rezepten noch nicht reproduzierbar.
+
 Der Diagnosepatch und der neue XNU-Hook müssen zusammen gebaut werden. Im vorhandenen funktionierenden Darwin-/Xcode-Buildsetup sind mindestens diese Teile neu zu erstellen:
 
 - NVIDIA-Objekt für `kapi/src/nvkms-kapi.c`;
