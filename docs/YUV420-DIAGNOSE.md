@@ -1,35 +1,43 @@
-# Diagnose von 4K/60 über DP zu HDMI
+<a id="diagnose-von-4k60-über-dp-zu-hdmi"></a>
 
-Diese Diagnose vergleicht zwei getrennte NVKMS-Modusvalidierungen. Sie soll zeigen, ob ein 3840×2160-Modus um 60 Hz mit den bisherigen Parametern scheitert und mit `preferYUV420=true` besteht. Sie ist kein Fix für die Ausgabe und kein Nachweis eines erfolgreichen Display-Modesets.
+# Diagnosing 4K/60 over DP to HDMI
 
-Quellbasis des Branches ist der vorhandene Forkstand `6e375469` (Changelog 2.6.2). Die untersuchten Displayquellen einschließlich `os-nvkms-xnu.cpp` sind dort gegenüber dem lokalen 2.5.4-Stand `4677905` unverändert. Es wurde kein Treiberpaket gebaut und keine Binärversion auf 2.5.4 umetikettiert.
+This diagnostic compares two separate NVKMS mode-validation passes. It is intended to establish whether a 3840×2160 mode at approximately 60 Hz fails with the existing parameters but passes with `preferYUV420=true`. It is not an output fix and does not demonstrate a successful display modeset.
 
-## Umfang und Dateien
+The branch is based on the existing fork revision `6e375469` (changelog 2.6.2). At that revision, the examined display sources, including `os-nvkms-xnu.cpp`, are unchanged from the local 2.5.4 revision `4677905`. No driver package has been built, and no binary version has been relabeled as 2.5.4.
 
-- `kexts/NVRM/patches/615-yuv420-diagnostic.patch` ergänzt die Diagnose in den externen NVIDIA-Quellen `kapi/src/nvkms-kapi.c` und `src/nvkms-modepool.c` des Tags **615.78.08**.
-- `kexts/NVRM/os-nvkms-xnu.cpp` ergänzt den Opt-in-Hook `nvkms_yuv420_diag_claim()`. Er beschränkt die Diagnose auf ausgewählte Display-IDs und beansprucht jede ID höchstens einmal pro Boot.
-- `tools/test_yuv420_diagnostic.py` prüft den Diagnosepfad unter Linux. Die tatsächlichen Testergebnisse sind dem Ausführungsprotokoll zu entnehmen.
+<a id="umfang-und-dateien"></a>
 
-Ohne das Bootargument `nvyuv420diag` werden die zusätzlichen A/B-Abfragen nicht gestartet. Die Standardparameter der produktiven Modusabfrage bleiben unverändert. Auch mit aktiviertem Argument ersetzt die Diagnose weder deren Antwort noch die produktive Modusliste.
+## Scope and files
 
-## Ablauf
+- `kexts/NVRM/patches/615-yuv420-diagnostic.patch` adds the diagnostic to the external NVIDIA sources `kapi/src/nvkms-kapi.c` and `src/nvkms-modepool.c` at tag **615.78.08**.
+- `kexts/NVRM/os-nvkms-xnu.cpp` adds the opt-in hook `nvkms_yuv420_diag_claim()`. It restricts the diagnostic to selected display IDs and claims each ID at most once per boot.
+- `tools/test_yuv420_diagnostic.py` tests the diagnostic path on Linux. Consult the execution output for the actual test results.
 
-Sobald `GetDisplayMode()` für eine ausgewählte ID erstmals einen Kandidaten mit 3840×2160 und 59–61 Hz zurückliefert, startet die Diagnose:
+The additional A/B queries do not run without the `nvyuv420diag` boot argument. The default parameters of the normal mode query remain unchanged. Even when the argument is enabled, the diagnostic replaces neither that query's response nor the normal mode list.
 
-1. Durchlauf **A** beginnt bei Modusindex 0 mit den bestehenden Standardparametern.
-2. Nach dessen Ende beginnt Durchlauf **B** erneut bei Modusindex 0. Ausschließlich `preferYUV420` ist zusätzlich gesetzt.
-3. Während jedes Durchlaufs bleiben die Auswahlparameter gleich. Beide Durchläufe verwenden eigene, frisch initialisierte Anfragen.
-4. Für passende 4K-Kandidaten werden der interne Modus und eine lokale Hin-und-zurück-Konvertierung durch KAPI protokolliert. Die konvertierten Kopien gelangen nicht in einen Modeset.
+<a id="ablauf"></a>
 
-Es werden ausschließlich `VALIDATE_MODE_INDEX`-Abfragen ergänzt. Es gibt keinen zusätzlichen Modeset- oder Commit-Aufruf und keine Abschaltung von Sicherheits- oder Bandbreitenprüfungen. NVKMS-Validierung kann trotzdem interne Caches und Hardwareabfragen verwenden; die Diagnose ist kein Beweis vollständig nebenwirkungsfreier Hardwarezugriffe. Zusätzliche Abfragen und Logging können den Start verlängern.
+## Execution flow
 
-Pro Durchlauf gilt eine Obergrenze von 512 Abfragen. Erst ein von NVKMS gemeldetes Listenende führt zu `COMPLETE`. Eine ausgeschöpfte Obergrenze beziehungsweise ein Abfragefehler führt zu `INCOMPLETE`; Allokations- und IOCTL-Fehler werden als `ABORT` gemeldet. Ein unvollständiger Durchlauf darf nicht als vollständiger Vergleich ausgewertet werden.
+The diagnostic starts when `GetDisplayMode()` first returns a candidate with 3840×2160 and 59–61 Hz for a selected ID:
 
-Die Kandidatenliste kann von den Validierungsparametern abhängen. **A und B daher über Quelle, vollständige Raster-/Sync-Timings, Pixeltakt und gegebenenfalls VIC zuordnen, nicht allein über denselben Modusindex.** Während der Erfassung weder Kabel noch Eingänge wechseln. Der Patch erzwingt keine unveränderliche EDID-/Hotplug-Generation über beide Durchläufe; ein solcher Wechsel macht den Vergleich erneut prüfbedürftig.
+1. Pass **A** starts at mode index 0 with the existing default parameters.
+2. Once that pass ends, pass **B** starts again at mode index 0. Only `preferYUV420` is additionally enabled.
+3. The selection parameters remain constant within each pass. Both passes use their own freshly initialized requests.
+4. For matching 4K candidates, the internal mode and a local round trip through the KAPI conversions are logged. The converted copies are not passed to a modeset.
 
-## Anwenden auf den NVIDIA-Quellbaum
+Only `VALIDATE_MODE_INDEX` queries are added. There is no additional modeset or commit call, and no safety or bandwidth checks are disabled. NVKMS validation can nevertheless use internal caches and hardware queries; this diagnostic does not establish that all hardware accesses are free of side effects. The additional queries and logging can increase boot time.
 
-Voraussetzung ist ein zum vorhandenen NullMoth-Build passender externer NVIDIA-Baum für **615.78.08**. Die nachfolgenden Variablen müssen auf die tatsächlichen lokalen Verzeichnisse zeigen:
+Each pass is limited to 512 queries. Only an end-of-list response from NVKMS produces `COMPLETE`. Reaching the limit or encountering a query failure produces `INCOMPLETE`; allocation and IOCTL failures are reported as `ABORT`. An incomplete pass must not be treated as a complete comparison.
+
+The candidate list can depend on the validation parameters. **Match A and B by source, complete raster/sync timings, pixel clock, and VIC where available, rather than by an identical mode index alone.** Do not change cables or inputs during capture. The patch does not enforce an unchanged EDID/hotplug generation across the two passes; such a change requires the comparison to be reassessed.
+
+<a id="anwenden-auf-den-nvidia-quellbaum"></a>
+
+## Applying the patch to the NVIDIA source tree
+
+An external NVIDIA **615.78.08** tree matching the existing NullMoth build is required. Set the following variables to the actual local directories:
 
 ```bash
 driver_repo=/pfad/zum/nvidia-macos-driver
@@ -40,106 +48,116 @@ git -C "$ogkm_root" apply --check --directory=src/nvidia-modeset "$diag_patch"
 git -C "$ogkm_root" apply --directory=src/nvidia-modeset "$diag_patch"
 ```
 
-Diese Befehle werden vom Root des vollständigen NVIDIA-Repositories aus ausgewertet. Vorhandene lokale Änderungen und die bestehende NullMoth-Patchfolge müssen erhalten bleiben. Bei einem fehlgeschlagenen `--check` die Abweichung untersuchen; nicht mit erzwungener Anwendung oder durch Entfernen bestehender Patches fortfahren.
+These commands resolve paths relative to the root of the full NVIDIA repository. Preserve existing local changes and the existing NullMoth patch sequence. If `--check` fails, investigate the difference; do not proceed by forcing application or removing existing patches.
 
-Die Diagnose ist gegen unveränderte 615.78.08-Quellen und zusätzlich nach `615-viewport-scaling.patch` geprüft. Das bestätigt nicht die vollständige historische Patchfolge: `610-display-completion.patch` lässt sich mit seinen vorhandenen Kontexten nicht vollständig auf unverändertes 615 anwenden. Der zum bisherigen Treiber gehörende, bereits funktionierende 615-Buildbaum ist deshalb maßgeblich; die alten 610-Patches hier nicht blind neu aufsetzen.
+The diagnostic has been checked against unmodified 615.78.08 sources and after applying `615-viewport-scaling.patch`. This does not validate the complete historical patch sequence: the existing contexts in `610-display-completion.patch` do not all apply to unmodified 615. The already working 615 build tree used for the existing driver is therefore the reference; do not blindly reapply the old 610 patches here.
 
-## Bauen und Installieren unter macOS
+<a id="bauen-und-installieren-unter-macos"></a>
 
-Die ausführliche Untersuchung des öffentlichen Buildpfads, der Binärkompatibilität zu 2.5.4 und des Rückwegs auf einem separaten Testsystem steht in [NVRM-DIAGNOSE-BUILD.md](NVRM-DIAGNOSE-BUILD.md). Der vollständige NVRM-Build ist aus den vorliegenden öffentlichen Rezepten noch nicht reproduzierbar.
+## Building and installing on macOS
 
-Der Diagnosepatch und der neue XNU-Hook müssen zusammen gebaut werden. Im vorhandenen funktionierenden Darwin-/Xcode-Buildsetup sind mindestens diese Teile neu zu erstellen:
+The detailed investigation of the public build path, binary compatibility with 2.5.4, and rollback on a separate test system is in [NVRM-DIAGNOSE-BUILD.md](NVRM-DIAGNOSE-BUILD.md). The complete NVRM build is not yet reproducible from the available public recipes.
 
-- NVIDIA-Objekt für `kapi/src/nvkms-kapi.c`;
-- NVIDIA-Objekt für `src/nvkms-modepool.c` und das zugehörige Modeset-Archiv;
-- NullMoths `os-nvkms-xnu.cpp` und das dagegen gelinkte `NVRM.kext`.
+The diagnostic patch and the new XNU hook must be built together. Using the existing working Darwin/Xcode build setup, rebuild at least:
 
-Die zusammengehörigen Komponenten über den bestehenden Build- und Installationsprozess bereitstellen. Ein Vendorarchiv allein enthält den neuen XNU-Hook nicht. Beim Linken auf ungelöste Symbole achten und das erzeugte Kext-Bundle mit den üblichen Build-/Signaturprüfungen kontrollieren.
+- the NVIDIA object for `kapi/src/nvkms-kapi.c`;
+- the NVIDIA object for `src/nvkms-modepool.c` and the corresponding modeset archive;
+- NullMoth's `os-nvkms-xnu.cpp` and the `NVRM.kext` linked against it.
 
-**`kexts/NVRM/build-completion-archive.py` ist hierfür ungeeignet.** Das vorhandene Skript ist auf NVIDIA 610.57.04, bestimmte vorhandene Darwin-Objekte und eine feste 610-Versionskennung zugeschnitten. Es ist kein vollständiger 615-Builder. `build/accel_build.sh` baut NVAccel und ersetzt ebenfalls keinen NVRM-Build.
+Deploy the matching components through the existing build and installation process. A vendor archive alone does not contain the new XNU hook. Check for unresolved symbols when linking, and validate the resulting kext bundle using the usual build and signature checks.
 
-Das Repository stellt keinen vollständigen eigenständig ausführbaren 615-NVRM-Build bereit. Ein bereits funktionierendes macOS-/Xcode-Buildsetup für den verwendeten NullMoth-Treiber bleibt Voraussetzung. Keine Kernelcollection-, Freigabe- oder Signaturprüfungen umgehen; den vorhandenen Installationsprozess für den passenden Kext-Satz verwenden. Vorher das bekannte funktionierende Paket und dessen Wiederherstellungsweg bereithalten.
+**`kexts/NVRM/build-completion-archive.py` is unsuitable for this purpose.** The existing script targets NVIDIA 610.57.04, specific existing Darwin objects, and a fixed 610 version identifier. It is not a complete 615 builder. `build/accel_build.sh` builds NVAccel and does not replace an NVRM build either.
 
-## Aktivieren und Logs erfassen
+The repository does not provide a complete, independently executable 615 NVRM build. An already working macOS/Xcode build setup for the NullMoth driver in use remains a prerequisite. Do not bypass kernel collection, approval, or signature checks; use the existing installation process for the matching kext set. Have the known working package and its recovery procedure available beforehand.
 
-Die Diagnose unterstützt zunächst **eine GPU**. Ziel-IDs sind die `display 0x...`-Werte aus deren aktuellen NVRMFB-Logs. Sie sind keine dauerhaft stabilen Portnummern. Nur einzelne Bit-IDs sind unterstützt; dynamische oder anders codierte IDs werden nicht allgemein abgedeckt.
+<a id="aktivieren-und-logs-erfassen"></a>
 
-Im bisherigen Mitschnitt entsprachen die betroffenen Wege den IDs `0x400` und `0x4000`; ihre kombinierte Maske ist `0x4400`. Nur wenn diese Zuordnung weiterhin stimmt, lautet das zusätzliche Bootargument:
+## Enabling the diagnostic and capturing logs
+
+The diagnostic currently supports **one GPU**. Target IDs are the `display 0x...` values from that GPU's current NVRMFB logs. They are not permanently stable port numbers. Only single-bit IDs are supported; dynamic or differently encoded IDs are not generally covered.
+
+In the previous capture, the affected paths corresponded to IDs `0x400` and `0x4000`; their combined mask is `0x4400`. Only if that mapping still holds is the additional boot argument:
 
 ```text
 nvyuv420diag=0x4400
 ```
 
-Es ist über den vorhandenen OpenCore-Konfigurationsweg zusätzlich zu den bisherigen Argumenten einzutragen. Andere Bootargumente unverändert lassen. Nach dem Boot die Zuordnung anhand der Enumeration erneut prüfen. Die Beanspruchung einer ID gilt bootweit und ist nicht nach GPU getrennt; die Maske deshalb nicht ungeprüft auf Mehr-GPU-Systemen einsetzen. Für eine Wiederholung ist ein neuer Boot erforderlich, auch nach einem Diagnoseabbruch.
+Add it alongside the existing arguments through the existing OpenCore configuration procedure. Leave other boot arguments unchanged. After boot, verify the mapping again against the enumeration. An ID claim applies for the entire boot and is not tracked separately per GPU; therefore, do not use the mask on multi-GPU systems without checking. A new boot is required to repeat the diagnostic, including after an aborted run.
 
-Logs über das vorhandene Diagnoseverfahren oder lesend im Terminal erfassen:
+Capture logs through the existing diagnostic procedure or with this read-only terminal command:
 
 ```bash
 log show --last 30m --style compact \
   --predicate 'eventMessage CONTAINS "Y420-AB"'
 ```
 
-Zusätzlich die NVRMFB-Enumeration aufbewahren, damit `dpy=0x...` dem physischen Signalweg zugeordnet werden kann. Ohne `BEGIN`-Zeilen ist nicht bewiesen, dass die Diagnose lief. Mögliche Gründe sind ein fehlendes Argument, ein nicht passender Build, eine falsche Ziel-ID oder kein abgefragter Kandidat im Filterbereich.
+Also retain the NVRMFB enumeration so that `dpy=0x...` can be mapped to the physical signal path. Without `BEGIN` lines, there is no evidence that the diagnostic ran. Possible reasons include a missing argument, a mismatched build, an incorrect target ID, or no queried candidate within the filter range.
 
-## Ausgabe interpretieren
+<a id="ausgabe-interpretieren"></a>
 
-Jede Ausgabe trägt `Y420-AB`, die Display-ID und bei den Durchläufen `pass=A` beziehungsweise `pass=B`.
+## Interpreting the output
 
-| Feld | Bedeutung |
+Each output line carries `Y420-AB`, the display ID, and, for the passes, `pass=A` or `pass=B`.
+
+| Field | Meaning |
 |---|---|
-| `source`, `index`, Raster-/Syncwerte | Identität des Kandidaten; Indizes zwischen A und B nicht ungeprüft gleichsetzen. |
-| `pclkHz` | Pixeltakt des vollständigen Modus in Hz. Bei typischem 4K/60 bleibt er auch für 4:2:0 bei 594 MHz. |
-| `rrMilliHz` | Bildfrequenz in Tausendstel Hz, zum Beispiel 60000 für 60 Hz. |
-| `masks rgb`, `y420` | EDID-abgeleitete BPC-Bitmasken des konkreten Timings, keine direkt ablesbare Zahl von Bits pro Komponente. |
-| `vic` | CTA-Videocode, soweit dem Kandidaten zugeordnet. |
-| `selected` | Ausgewähltes Enum: `0=NONE`, `1=SW`, `2=HW`. |
-| `hdmi`, `dp` | Von NVKMS verwendete HDMI-/DP-Bibliothekszuordnung; keine vollständige physische Adapteridentifikation. |
-| `maxPclkKHz`, `singleLinkKHz` | Von NVKMS verwendete effektive Pixelclock-/Single-Link-Grenzen in kHz. Interpretation ist vom Protokoll und Format abhängig; keine elektrische TMDS-Messung. Rohe RM-Dongle- oder aktive PCON-DPCD-Fähigkeiten werden nicht separat abgefragt. |
-| `final format` | Ausgangsformat: `0=RGB`, `1=YCbCr422`, `2=YCbCr444`, `3=YCbCr420`. |
-| `bpc` | Echte Bits pro Farbkomponente: `6`, `8`, `10`, `12`; `0` bedeutet unbekannt. |
-| `range` | NVKMS-Enumwert für den Quantisierungsbereich: `0=FULL`, `1=LIMITED`. |
-| `valid` | Ergebnis der betreffenden internen Validierung. |
-| `yuv420`, `roundtrip`, `lost` | Internes Enum vor der KAPI-Konvertierung, Enum nach lokalem Rückweg und Kennzeichen einer Abweichung. |
-| `info:` | Vorhandener NVKMS-Validierungstext, ergänzt um die Diagnosewerte. |
+| `source`, `index`, raster/sync values | Candidate identity; do not assume that identical indices in A and B identify the same candidate. |
+| `pclkHz` | Pixel clock of the complete mode in Hz. For typical 4K/60 timings, it remains 594 MHz even with 4:2:0. |
+| `rrMilliHz` | Refresh rate in thousandths of a hertz, for example 60000 for 60 Hz. |
+| `masks rgb`, `y420` | EDID-derived BPC bitmasks for the specific timing, not a directly readable number of bits per component. |
+| `vic` | CTA video code, where associated with the candidate. |
+| `selected` | Selected enum: `0=NONE`, `1=SW`, `2=HW`. |
+| `hdmi`, `dp` | HDMI/DP-library classification used by NVKMS; not a complete identification of the physical adapter. |
+| `maxPclkKHz`, `singleLinkKHz` | Effective pixel-clock/single-link limits used by NVKMS, in kHz. Their interpretation depends on the protocol and format; these are not electrical TMDS measurements. Raw RM dongle or active-PCON DPCD capabilities are not queried separately. |
+| `final format` | Output format: `0=RGB`, `1=YCbCr422`, `2=YCbCr444`, `3=YCbCr420`. |
+| `bpc` | Actual bits per color component: `6`, `8`, `10`, `12`; `0` means unknown. |
+| `range` | NVKMS enum for the quantization range: `0=FULL`, `1=LIMITED`. |
+| `valid` | Result of the corresponding internal validation. |
+| `yuv420`, `roundtrip`, `lost` | Internal enum before KAPI conversion, enum after the local round trip, and an indicator of a difference. |
+| `info:` | Existing NVKMS validation text with the additional diagnostic values. |
 
-Der Info-Puffer ist auf `NVKMS_MODE_VALIDATION_MAX_INFO_STRING_LENGTH` begrenzt, im untersuchten Stand 2048 Byte. Die Ausgabe wird in kurze Zeilen aufgeteilt. `INFO_MAY_BE_TRUNCATED` bedeutet, dass Text am Pufferende fehlen kann; ein fehlender Ablehnungsgrund darf dann nicht als Erfolg interpretiert werden. Scheitert die Validierung vor der Farbwahl, ist keine `final format`-/BPC-Zeile zu erwarten. Auch das ist kein Beweis einer bestimmten Farbtiefe.
+The info buffer is limited to `NVKMS_MODE_VALIDATION_MAX_INFO_STRING_LENGTH`, which is 2048 bytes in the examined revision. Output is split into short lines. `INFO_MAY_BE_TRUNCATED` means that text at the end of the buffer may be missing; a missing rejection reason must not then be interpreted as success. If validation fails before output color selection, no `final format`/BPC line is expected. That also does not establish any particular color depth.
 
-Für typische CTA-Timings benötigt 4K/60 mit RGB und 8 BPC 594 MHz TMDS-Zeichenrate; mit 4:2:0 und 8 BPC 297 MHz. **Der vollständige 594-MHz-Pixeltakt darf bei diesem Vergleich nicht mit der TMDS-Zeichenrate verwechselt oder einfach halbiert werden.**
+For typical CTA timings, 4K/60 with RGB and 8 BPC requires a 594 MHz TMDS character rate; with 4:2:0 and 8 BPC, it requires 297 MHz. **Do not confuse the complete 594 MHz pixel clock with the TMDS character rate or simply halve it in this comparison.**
 
-| Vergleich | Aussage |
+| Comparison | Interpretation |
 |---|---|
-| A: `NONE`, `valid=0`; B: `SW`/`HW`, `valid=1` | Die frühe 4:2:0-Auswahl ist entscheidend für die interne Validierung. Ein funktionierender Display-Modeset ist damit noch nicht bewiesen. |
-| B bleibt `NONE`, obwohl `y420` Unterstützung enthält | Anschlusszweig und zusätzliche 4:2:0-Zulässigkeitsbedingungen prüfen. |
-| Geparste `y420`-Maske enthält keine Unterstützung | EDID-Übernahme und Zuordnung des konkreten Timings untersuchen. |
-| B wählt 4:2:0, bleibt aber ungültig | Der `infoString` muss die verbleibende Prüfung erklären. |
-| `yuv420=SW`/`HW`, `roundtrip=NONE`, `lost=1` | Die lokale KAPI-Hin-und-zurück-Konvertierung verliert das Kennzeichen. Das ist kein tatsächlich ausgeführter Modeset. |
+| A: `NONE`, `valid=0`; B: `SW`/`HW`, `valid=1` | The early 4:2:0 selection is decisive for internal validation. A working display modeset has not yet been demonstrated. |
+| B remains `NONE` even though `y420` indicates support | Check the connector path and additional 4:2:0 eligibility conditions. |
+| The parsed `y420` mask indicates no support | Investigate EDID import and the mapping of the specific timing. |
+| B selects 4:2:0 but remains invalid | The `infoString` must explain the remaining check. |
+| `yuv420=SW`/`HW`, `roundtrip=NONE`, `lost=1` | The local KAPI round trip loses the flag. This is not an actual modeset. |
 
-## Linux-Prüfungen und offene Validierung
+<a id="linux-prüfungen-und-offene-validierung"></a>
 
-Der vorgesehene Testaufruf für den vollständigen externen NVIDIA-Quellbaum lautet:
+## Linux checks and outstanding validation
+
+The intended test command, using the full external NVIDIA source tree, is:
 
 ```bash
 cd "$driver_repo"
 python3 tools/test_yuv420_diagnostic.py --vendor "$ogkm_root"
 ```
 
-Unter Linux bestanden zwölf Testfälle mit einem simulierten NVKMS-Endpunkt: A/B-Trennung mit unterschiedlichen Kandidatenindizes, unveränderte produktive Antworten, Filter-/Ende-/Fehlerfälle, beide Allokationsfehler, Abfrage- und Puffergrenzen, HW-/SW-KAPI-Kennzeichenverlust und der nebenläufige Einmal-Hook. Patch-Anwendung und Rücknahme wurden ohne Fuzz geprüft; die übergebenen NVIDIA-Originaldateien blieben unverändert.
+Twelve tests passed on Linux with a simulated NVKMS endpoint: separate A/B passes with different candidate indices, unchanged normal responses, filter/end/error cases, both allocation failures, query and buffer limits, HW/SW KAPI flag loss, and the concurrent once-per-boot hook. Patch application and reversal were checked without fuzz; the supplied original NVIDIA files remained unchanged.
 
-Zusätzlich prüft derselbe Testaufruf beide vollständigen gepatchten NVIDIA-C-Dateien mit `-fsyntax-only`, echten 615-Headern und Include-/Define-Optionen aus dem Vendor-Makefile. Beide Syntax- und Formatprüfungen bestanden unter Linux mit GCC. Das ist keine Darwin-Kompilation, kein Linktest und kein Test des EDID-Parsers oder der Hardwarevalidierung; deren Ergebnisse simuliert der Test-Endpunkt.
+The same test command also checks both complete patched NVIDIA C files using `-fsyntax-only`, actual 615 headers, and include/define options from the vendor Makefile. Both syntax and format checks passed on Linux with GCC. This is not a Darwin compilation, a link test, or a test of the EDID parser or hardware validation; the test endpoint simulates their results.
 
-Erst mit dem passenden macOS-/Xcode-Build sind Link- und Kext-Kompatibilität prüfbar. Erst auf echter Hardware sind Startverhalten, A/B-Ergebnisse, Adaptergrenzen, Logvollständigkeit und unveränderte Displayausgabe prüfbar. Diese Punkte bleiben bis zur entsprechenden Ausführung offen. Die Diagnose stellt keine 4K/60-Ausgabe um und behebt das Problem noch nicht.
+Link and kext compatibility can only be checked with the matching macOS/Xcode build. Boot behavior, A/B results, adapter limits, log completeness, and unchanged display output can only be checked on real hardware. These items remain unverified until those checks are performed. The diagnostic does not switch the output to 4K/60 and does not fix the problem yet.
 
-## Rücknahme
+<a id="rücknahme"></a>
 
-1. Für zukünftige Starts das zusätzliche Bootargument entfernen. Das unterbindet neue A/B-Abfragen, ersetzt aber die eingebaute Diagnosebinärdatei nicht durch die vorherige Version.
-2. Den Vendorpatch nur dann rückwärts anwenden, wenn die Prüfung ohne Konflikte gelingt:
+## Reverting the changes
+
+1. Remove the additional boot argument for future boots. This prevents new A/B queries but does not replace the installed diagnostic binary with the previous version.
+2. Reverse the vendor patch only if the check completes without conflicts:
 
    ```bash
    git -C "$ogkm_root" apply --reverse --check --directory=src/nvidia-modeset "$diag_patch"
    git -C "$ogkm_root" apply --reverse --directory=src/nvidia-modeset "$diag_patch"
    ```
 
-3. Die Änderungen im NullMoth-Branch nach Prüfung mit `git diff` gezielt zurücknehmen. Solange sie uncommittet sind, nur die zu dieser Diagnose gehörenden Änderungen wiederherstellen beziehungsweise neuen Dateien entfernen; bestehende eigene Änderungen nicht pauschal überschreiben. Nach einem späteren Commit ist ein gezieltes `git revert <Diagnose-Commit>` eine nachvollziehbare Alternative.
-4. Auf dem Mac das bekannte funktionierende Treiberpaket über den bestehenden Installations- und Kernelcollection-Prozess wiederherstellen und neu starten. Ein Branchwechsel oder rückwärts angewandter Quellpatch allein verändert bereits installierte Kexts nicht.
+3. After reviewing `git diff`, selectively revert the changes in the NullMoth branch. While they are uncommitted, restore only changes or remove new files belonging to this diagnostic; do not indiscriminately overwrite existing personal changes. After a later commit, a targeted `git revert <Diagnose-Commit>` is a traceable alternative.
+4. On the Mac, restore the known working driver package through the existing installation and kernel collection process, then reboot. Switching branches or reversing a source patch alone does not change already installed kexts.
 
-Der Diagnosebranch muss weder gemergt noch veröffentlicht werden. Ein Pull Request zum ursprünglichen NullMoth-Projekt ist für diese lokale Untersuchung nicht erforderlich.
+The diagnostic branch does not have to be merged or published. A pull request to the original NullMoth project is not required for this local investigation.
