@@ -56,7 +56,7 @@ The diagnostic has been checked against unmodified 615.78.08 sources and after a
 
 ## Building and installing on macOS
 
-The detailed investigation of the public build path, binary compatibility with 2.5.4, and rollback on a separate test system is in [NVRM-DIAGNOSE-BUILD.md](NVRM-DIAGNOSE-BUILD.md). The complete NVRM build is not yet reproducible from the available public recipes.
+The detailed investigation of the public build path, binary compatibility with 2.5.4, and rollback on a separate test system is in [NVRM-DIAGNOSE-BUILD.md](NVRM-DIAGNOSE-BUILD.md). The separate [NVRM-615-REFERENCE-BUILD.md](NVRM-615-REFERENCE-BUILD.md) now documents an isolated reference harness adapted from NvGfx, closing the previously missing public archive/link recipe. That reference must be built and compared with official 2.5.4 before diagnostic integration; its macOS validation remains open.
 
 The diagnostic patch and the new XNU hook must be built together. Using the existing working Darwin/Xcode build setup, rebuild at least:
 
@@ -68,7 +68,7 @@ Deploy the matching components through the existing build and installation proce
 
 **`kexts/NVRM/build-completion-archive.py` is unsuitable for this purpose.** The existing script targets NVIDIA 610.57.04, specific existing Darwin objects, and a fixed 610 version identifier. It is not a complete 615 builder. `build/accel_build.sh` builds NVAccel and does not replace an NVRM build either.
 
-The repository does not provide a complete, independently executable 615 NVRM build. An already working macOS/Xcode build setup for the NullMoth driver in use remains a prerequisite. Do not bypass kernel collection, approval, or signature checks; use the existing installation process for the matching kext set. Have the known working package and its recovery procedure available beforehand.
+The original checkout lacked a complete, independently executable 615 NVRM build. The new separate reference harness prepares that build using a checked CLT/SDK environment; it does not yet integrate this diagnostic or establish compatibility. For the diagnostic build described here, a working, matching Darwin build remains a prerequisite. Do not bypass kernel collection, approval, or signature checks; use the existing installation process for the matching kext set. Have the known working package and its recovery procedure available beforehand.
 
 <a id="aktivieren-und-logs-erfassen"></a>
 

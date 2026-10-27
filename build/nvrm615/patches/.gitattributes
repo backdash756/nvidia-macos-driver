@@ -1,0 +1,2 @@
+# Unified-diff context lines intentionally retain their single-space prefix.
+*.patch whitespace=-blank-at-eol,-blank-at-eof

@@ -1,0 +1,54 @@
+{
+  "format": 1,
+  "nullmoth_source_commit": "46779055f68208baa5ddfb9b2e9c77ed028e1d59",
+  "nvgfx_reference_commit": "0eff8317443f7af55dc4b4fd333173819859799c",
+  "nvidia_tag": "615.78.08",
+  "nvidia_commit": "1a82fbfda8f321b056eb3568850f9316c5e465c5",
+  "patch_order": [
+    {
+      "original_path": "kexts/NVRM/patches/610-display-completion.patch",
+      "original_sha256": "729216b44c0f1dc31223d971d5aadf2e5531a1f8cf69b12ede8e41da3a7971eb",
+      "normalized_path": "615-display-completion.patch",
+      "normalized_sha256": "c5e623469c24ddf9cb2b35f9e9536deb77b3df6eb3c0aaf4d9fc6726eff10c4c",
+      "target_path": "kapi/src/nvkms-kapi.c"
+    },
+    {
+      "original_path": "kexts/NVRM/patches/610-setmode-reason.patch",
+      "original_sha256": "622e99e70a52310ef4c8a9bae4b20f10dfe3c78b300a594267cb4dfcc6f50ffb",
+      "normalized_path": "615-setmode-reason.patch",
+      "normalized_sha256": "1683edc47fac3128666862cb232bb7ba97a1e3670a7c17e29c8146b4786466ef",
+      "target_path": "kapi/src/nvkms-kapi.c"
+    },
+    {
+      "original_path": "kexts/NVRM/patches/615-viewport-scaling.patch",
+      "original_sha256": "c0c30b4085a43d60c0ff0427c12e3c44dd490d6cf6a501edb446b5d9cf6b501f",
+      "normalized_path": "615-viewport-scaling.patch",
+      "normalized_sha256": "8abcaf6000df8a85f6c439ba189562d321b29049efd44147562ca2476d58c711",
+      "target_path": "kapi/src/nvkms-kapi.c"
+    },
+    {
+      "original_path": "kexts/NVRM/patches/610-backlight-register-log.patch",
+      "original_sha256": "97b7028ed45789895906615f1417103e728d8e5b86cde6fef3137c28d5a6a64d",
+      "normalized_path": "615-backlight-register-log.patch",
+      "normalized_sha256": "913e3961a78398b4263d79ddfbea0b9be533702ddfd9f91bbf6166c706007696",
+      "target_path": "src/nvkms-rm.c"
+    }
+  ],
+  "patched_sources_sha256": {
+    "kapi/src/nvkms-kapi.c": "ff0f957733b1576ad5ddd6e6c60c33f899c71f0010e52b1c078f90011203ae81",
+    "src/nvkms-rm.c": "0118510d6ee1c72b8cef4be93338ad1ca0d681ef15df880a39a9157950bb01cc"
+  },
+  "normalization": "Unified-diff context and line numbers only; patched bytes are identical to applying the original ordered NvGfx patch series with GNU patch default fuzz. The 610 display-completion insertion requires fuzz 1 against vanilla 615 because the immediately preceding function changed; normalized patches require no fuzz.",
+  "linux_checks": {
+    "strict_application": true,
+    "duplicate_application_rejected": true,
+    "byte_identity_to_original_patch_series": true,
+    "existing_yuv420_diagnostic_applies_after_baseline": true
+  },
+  "excluded": [
+    "610-fsp-timer-double-destroy.patch",
+    "615-yuv420-diagnostic.patch",
+    "NvGfx-specific power management and physical-control modifications"
+  ],
+  "macos_build_or_hardware_validation_performed": false
+}

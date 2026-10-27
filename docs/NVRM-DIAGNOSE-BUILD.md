@@ -6,7 +6,9 @@
 
 ## Findings and status
 
-The available public fork and unmodified NVIDIA sources currently do **not provide a reproducible, complete NVRM build with demonstrated compatibility with the shipped 2.5.4 release**. The XNU porting sources are present, but the complete Darwin build/link recipe and the exact preparation of the shipped NVIDIA backend are missing. An invented `make TARGET_OS=Darwin` command would not close that gap.
+> **Updated build investigation:** The audited NvGfx 615 Darwin harness now supplies the archive and link recipe missing from the original investigation below. See [NVRM-615-REFERENCE-BUILD.md](NVRM-615-REFERENCE-BUILD.md) for the isolated 2.5.4 reference workflow, strict patch manifest, CLT/SDK preflight and remaining macOS validation. This file retains the original audit and the compatibility/recovery cautions. Statements below about missing public recipes describe the checkout before this new harness; no macOS build or hardware qualification has yet been performed.
+
+At the time of the original investigation, the public fork and unmodified NVIDIA sources did **not provide a reproducible, complete NVRM build with demonstrated compatibility with the shipped 2.5.4 release**. The XNU porting sources were present, but the complete Darwin build/link recipe and the exact preparation of the shipped NVIDIA backend were missing from that checkout. An invented `make TARGET_OS=Darwin` command would not have closed that gap. The new reconstructed harness now provides the concrete archive/link recipe; its compatibility still needs a real reference build and comparison.
 
 The smallest useful diagnostic build can nevertheless be defined clearly: reuse an already working Darwin build matching 2.5.4, including the unchanged individual NVRM object files and the final link recipe; rebuild two NVKMS objects and the XNU hook; then relink exactly **NVRM.kext**. The other working 2.5.4 components remain unchanged. This is a conditional build plan, not yet a verified procedure that produces a finished kext.
 
@@ -178,4 +180,4 @@ To reset the test system, restore its complete known 2.5.4 state. Reuse an old K
 - Outstanding: a complete Darwin baseline build matching the release, toolchain/SDK pins, final kext linking and metadata generation, binary comparison, loadability, and boot on the RTX 5080.
 - Outstanding: a separate test volume group that has been qualified in practice and its selective deployment/recovery process. None of that has been set up or installed here.
 
-The next required input is therefore a **complete 615 Darwin build tree or its reproducible recipe and release patch manifest**. Without it, the documentation can define the minimal build precisely, but cannot produce a compatible NVRM.kext from nothing.
+The original next requirement was a **complete 615 Darwin build tree or its reproducible recipe and release patch manifest**. The audited NvGfx harness now supplies a reconstructed public recipe, and the isolated reference workflow supplies its pinned baseline patch manifest. The next concrete steps are the CLT/SDK preflight, a complete unchanged reference build, and comparison against the known-working official 2.5.4 bundle. Exact release metadata, binary compatibility and hardware qualification remain open; see [NVRM-615-REFERENCE-BUILD.md](NVRM-615-REFERENCE-BUILD.md).
