@@ -90,11 +90,54 @@ MH_MAGIC_64 X86_64   ALL         0x00  KEXTBUNDLE 7
 
 [macho.py](../build/nvrm615/macho.py) now supplies the single header parser and kext-type predicate used by both preflight and comparison. They read the actual `filetype` column of exactly one valid header table; filenames and unrelated text are not type evidence. Accepted representations are `KEXTBUNDLE`, `KEXT_BUNDLE`, `MH_KEXT_BUNDLE`, and numeric `MH_KEXT_BUNDLE` value 11 / `0xb` (including equivalent hexadecimal formatting). Executables, dylibs, ordinary bundles and malformed/ambiguous headers remain rejected.
 
-After recognizing the header, the preflight still requires a successful `nm -u` call before recording artifact hashes and `status: passed` in `preflight.json`. A symbol-tool failure is not ignored. Linux regression tests simulate the complete tool sequence using the actual header above, including the saved success/failure reports; they do not run Apple's compiler or tools. The corrected preflight must still be rerun on macOS. The user's earlier successful probes are reported observations, not a newly executed macOS test of this commit.
+After recognizing the header, the preflight still requires a successful `nm -u` call before recording artifact hashes and `status: passed` in `preflight.json`. A symbol-tool failure is not ignored. The user subsequently confirmed a complete successful preflight on Tahoe 26.7.1 / x86_64 with SDK 26.5, including this symbol check. Linux regression tests also simulate the complete tool sequence and saved success/failure reports; they do not run Apple's compiler or tools. The user's local results are reported observations, not a newly executed macOS test of the current build fixes.
+
+## First real Darwin RM build: fixes and evidence
+
+Starting from `8901170588d721f5681852a5c38b2f52a6bdd41c`, the user successfully prepared `reference-002` and `reference-003`. The first attempt stopped after preflight because the path guard rejected Homebrew Python `/usr/local/opt/python@3.15/bin/python3.15`. With `/usr/bin/python3` (3.9.6), the second attempt built `libnvkernel.a` and then stopped at object-manifest comparison. No NVKMS archive or complete NVRM link was reached.
+
+The reported RM archive is approximately 20 MB and has 1101 `ar -t` entries: 1100 object files and `__.SYMDEF`, Apple's archive symbol index. That is consistent with the expected RM object count, but does not establish member architecture, symbol-index correctness or linkability. The archive itself was not supplied to this Linux environment and has not been inspected here.
+
+The backed-up official reference at `~/nvrm-reference/2.5.4/NVRM.kext` was reported as bundle ID `com.nullmoth.NVRM`, version `2.5.4`, strictly signature-verified and byte-identical to the installed binary. Its reported binary SHA-256 is `4591c5bd732838417168b366380c9a0eefdd4ad940d3eed3bfff22f6ade2e0f7`. The helpers only read that reference; they never replace, resign or alter it.
+
+### Path validation at the actual expansion boundary
+
+| Path role | Treatment |
+|---|---|
+| SDK and `clang`, `clang++`, `ld`, `ar`, `libtool` paths | Retain the strict existing Make/shell character restriction. These paths enter NVIDIA Make variables or shell-expanded compiler flags. |
+| Python interpreter, `make` executable, `codesign`, direct preflight/comparison tools | Launched as subprocess argument lists. They are not subjected to a Make expansion restriction merely because their paths are recorded in the preflight report. Homebrew Python's `@` is valid here. |
+| Staged source/object paths | Retain `output_path()` restrictions. Compilation reads the owned snapshot, not the original working tree. |
+| Original vendor/repository inputs | Passed as Git arguments to materialize pinned sources. Existing inputs are not patched or overwritten. |
+
+The fix narrows validation to paths actually expanded by Make; it does not broaden the Make-safe character whitelist. `$`, shell metacharacters and problematic whitespace remain rejected at that boundary. All direct launches still use argv lists with no shell.
+
+### Why Apple's linker output became six extra objects
+
+NVIDIA `utils.mk:604` immediately evaluates `LD_IS_LLD := $(if $(filter LLD,$(shell $(LD) -v)),1)` when either component's Makefile is read. GNU make captures the probe's stdout; Apple's `ld -v` writes its six-line version banner to stderr. The original recorder merged stderr into stdout and returned the result to the manifest parser. Thus RM's 1100 real paths became 1106 lines. The same path affects NVKMS: Linux reproduction with the real Makefiles and a simulated Apple linker yields 225 paths plus the same six stderr lines. This is not a successful macOS NVKMS build.
+
+The recorder now writes stdout to `logs/<stage>.log` and stderr to `logs/<stage>.stderr.log`, records both paths in `commands.jsonl`, and returns only stdout for data parsing. Neither channel is discarded. Failed commands still abort and name both logs. No NVIDIA source change, linker-probe override or banner whitelist is needed; an override in the second-loaded overlay would be too late for that immediate probe.
+
+The object validator requires exact multisets, one compiler output and manifest entry per object. It rejects missing, extra and duplicate objects, empty inventories, malformed paths and **all unknown nonempty stdout lines**, including the familiar Apple banner if it were actually emitted on stdout. `*-manifest-check.json` retains the complete differences; the terminal error includes counts and bounded examples. Compiler return failures remain fatal. The object count comes from the pinned Makefile inventory, not a hard-coded 1100/225 acceptance rule.
+
+### Archive member validation
+
+After each component's object-manifest check, [archives.py](../build/nvrm615/archives.py) validates the archive before the next build stage. It reads native Darwin ar containers, including BSD extended names, requires every object to be thin little-endian Mach-O64 / x86_64 / `MH_OBJECT`, checks header/load-command bounds and compares exact member basenames against the expected object inventory. Apple's `__.SYMDEF` / sorted / 64-bit index variants are reported separately and never counted as NVIDIA objects. Missing, extra or duplicate objects, unsupported formats and wrong architectures stop the build. `*-archive-check.json` records the result.
+
+These are container/header/inventory checks. They do not validate the symbol-index contents, relocations, internal ABI or final linkability. Those require the real Darwin link and reference comparison, which remain open.
+
+For a read-only inspection of the already created RM archive and its existing libtool file list, without resuming or modifying the old build:
+
+```bash
+python3 build/nvrm615/archives.py \
+  --archive "$HOME/nvrm-builds/reference-003/ogkm/src/nvidia/_out/Darwin_x86_64/libnvkernel.a" \
+  --objects "$HOME/nvrm-builds/reference-003/ogkm/src/nvidia/_out/Darwin_x86_64/libnvkernel.a.filelist"
+```
+
+The command prints JSON to stdout and writes no files. Preserve `reference-002`, `reference-003` and the official reference bundle unchanged. Do not delete outputs, alter their manifests/build status, or continue a started build after these script fixes.
 
 ## Commands: preparation and build only
 
-Review the committed helpers before running them. Use an ordinary account without `sudo`. All output goes into a new dedicated directory outside either source checkout; existing outputs are not overwritten or recursively cleaned. Use simple absolute build paths and SDK/tool paths without spaces or shell/make metacharacters; NVIDIA's Makefile command expansion requires this restriction. No helper installs, loads, creates Kernel Collections, or changes EFI/NVRAM/SIP.
+Review the committed helpers before running them. Use an ordinary account without `sudo`. All output goes into a new dedicated directory outside either source checkout; existing outputs are not overwritten or recursively cleaned. Use simple absolute output paths, and SDK/Make-expanded tool paths without spaces or shell/make metacharacters. This restriction does not apply to metadata-only/direct-argv interpreter paths such as Homebrew Python with `@`. No helper installs, loads, creates Kernel Collections, or changes EFI/NVRAM/SIP.
 
 To update an existing checkout manually, run these commands from its repository root. They do not rewrite divergent history; a non-fast-forward update stops instead:
 
@@ -122,14 +165,14 @@ git -C "$HOME/nvrm-inputs/open-gpu-615" rev-parse HEAD
 
 The resolved commit must match the NVIDIA pin above. The pinned NullMoth source commit must also already exist in local Git history. The user's earlier shallow-clone issue has been resolved locally; the helpers perform no automatic fetch, unshallow operation or history rewrite.
 
-**After updating the build helpers, prepare a new reference output directory.** Existing `854d272` preparations intentionally fail the recipe-hash check, including after adding the shared parser. Do not edit old manifests or reuse partial builds; retain their logs and choose a fresh path such as `reference-002` for the example below. The unchanged single-attempt build policy still applies.
+**After updating the build helpers, prepare a new reference output directory.** Preparations made with earlier helper versions intentionally fail the recipe-hash check. Do not edit old manifests or reuse partial builds; retain their logs and choose a fresh path such as `reference-004` for the example below. Existing `reference-002` and `reference-003` are evidence and must remain unchanged. The unchanged single-attempt build policy still applies.
 
 From this branch's repository root (the example requires a directory that does not yet exist):
 
 ```bash
 python3 build/nvrm615/build.py prepare \
   --vendor "$HOME/nvrm-inputs/open-gpu-615" \
-  --output "$HOME/nvrm-builds/reference-002"
+  --output "$HOME/nvrm-builds/reference-004"
 ```
 
 Preparation also works under Linux. It materializes independent Git archives, not shared clones or dirty working-tree files, and applies the baseline patches strictly. It records every staged input hash and the build-recipe hashes in `inputs.json`. It does not compile. To compile later, run preparation on the Mac rather than moving its path-bound output directory.
@@ -138,7 +181,7 @@ After providing a complete backed-up official 2.5.4 reference bundle outside the
 
 ```bash
 python3 build/nvrm615/build.py build \
-  --output "$HOME/nvrm-builds/reference-002" \
+  --output "$HOME/nvrm-builds/reference-004" \
   --reference "$HOME/nvrm-reference/2.5.4/NVRM.kext" \
   --jobs 4
 ```
@@ -158,7 +201,8 @@ The corrected macOS preflight and the full build/compare command paths have not 
 | `ogkm/src/nvidia-modeset/_out/Darwin_x86_64/libnvkms.a` | Paired, already baseline-patched NVKMS Mach-O archive |
 | Each component's `compile_cmds.sh` and top-level `*-objects.json` | Recorded compile templates and object manifests |
 | `preflight/preflight.json` | Selected SDK/header/tool hashes and versions, probe commands/results |
-| `glue/`, `logs/`, `commands.jsonl` | C/C++ objects, build transcripts, explicit commands/working directories |
+| `glue/`, `logs/`, `commands.jsonl` | C/C++ objects; separate `<stage>.log` stdout and `<stage>.stderr.log` diagnostics; explicit commands, working directories and both log paths |
+| `*-manifest-check.json`, `*-archive-check.json` | Strict object-list differences and archive member/architecture validation results |
 | `NVRM.kext` | Ad-hoc-signed reference candidate; not installed or hardware-qualified |
 | `artifacts.json`, `build-state.json` | Artifact hashes and attempt/comparison state |
 | `comparison/` | Mandatory official-reference static report and raw tool output |
@@ -175,10 +219,14 @@ Linux checks cover Python/CLI guards, actual pinned-source extraction, strict pa
 
 ```bash
 python3 tools/test_nvrm615_macho.py
+python3 tools/test_nvrm615_archives.py
+python3 tools/test_nvrm615_manifest.py --vendor /absolute/path/to/open-gpu-615
 python3 tools/test_nvrm615_build.py --vendor /absolute/path/to/open-gpu-615
 ```
 
-The original baseline Linux run passed 39 tests, including real Makefile dry runs covering 1100 RM and 225 NVKMS objects and native syntax/format checks of both complete baseline-patched C files. These Makefile checks use the Linux host compiler and do not qualify Apple Clang flags or Mach-O output. The command output is the authoritative test result. The updated Linux validation passed all 39 baseline tests and 14 new Mach-O regressions (53 total). The Mach-O regressions cover the real Apple header, accepted constant representations, negative file types, malformed headers, comparison decisions and the complete simulated preflight through symbol checking and JSON output. The corrected macOS preflight, complete NVRM compilation, Mach-O archives/link/signing, official 2.5.4 comparison, boot and RTX 5080 display behavior remain open. An author-reported RTX 5070 laptop boot is not a substitute for these checks.
+The original baseline Linux run passed 39 tests, including real Makefile dry runs covering 1100 RM and 225 NVKMS objects and native syntax/format checks of both complete baseline-patched C files. These Makefile checks use the Linux host compiler and do not qualify Apple Clang flags or Mach-O output. The command output is the authoritative test result. The current Linux validation passed 85 tests: 39 baseline, 14 Mach-O, 15 path/manifest/channel and 17 archive tests. The Mach-O regressions cover the real Apple header, accepted constant representations, negative file types, malformed headers, comparison decisions and the complete simulated preflight through symbol checking and JSON output. The corrected preflight has now been reported successful on the user's Mac. The current path/stream/archive fixes, NVKMS compilation, complete NVRM link/signing, official 2.5.4 comparison, boot and RTX 5080 display behavior remain untested on macOS here. An author-reported RTX 5070 laptop boot is not a substitute for these checks.
+
+The new regression suites additionally test actual direct-argv execution through an `@` interpreter path, unsafe Make paths, the exact six-line Apple linker banner with both real pinned Makefiles, 1100/225 object inventories and all mismatch cases, subprocess failures, and synthetic archive format/architecture failures. Simulated Apple-linker and synthetic archive tests are not Darwin compilation results.
 
 Only after the unchanged reference compiles and its official 2.5.4 comparison has been reviewed should a separate diagnostic output be prepared. The later change is small: use the same baseline/toolchain, add the existing vendor diagnostic patch, pair it with the existing `os-nvkms-xnu.cpp` hook, rebuild the affected NVKMS objects/archive and XNU hook, and relink NVRM. The present runner has no diagnostic-enable option and does not perform that integration automatically.
 

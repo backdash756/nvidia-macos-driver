@@ -7,6 +7,7 @@ commit 0eff8317443f7af55dc4b4fd333173819859799c, by watchthelight.
 License: PolyForm-Noncommercial-1.0.0; see the repository LICENSE.
 """
 import argparse
+from collections import Counter
 import datetime
 import hashlib
 import json
@@ -185,6 +186,69 @@ def load_inputs(value):
     return out, manifest
 
 
+def validate_make_paths(sdk, tools):
+    """Restrict paths expanded by Make/shell rules, not direct argv metadata.
+
+    Python, make itself and codesign are launched through subprocess argv;
+    a Homebrew interpreter's '@' is not a shell or Make expansion there.
+    Staged source/object paths remain restricted by output_path().
+    """
+    expanded = [('SDK', sdk)] + [(name, tools[name]) for name in
+                                  ('clang', 'clang++', 'ld', 'ar', 'libtool')]
+    for label, path in expanded:
+        if re.search(r'[^A-Za-z0-9_./+:-]', path):
+            fail('SDK/Make-expanded tool path must not contain spaces or make/shell '
+                 'metacharacters (' + label + '): ' + path)
+
+
+def _count_examples(counts, limit=5):
+    return ', '.join(repr(path) + ' (x' + str(count) + ')'
+                     for path, count in sorted(counts.items())[:limit])
+
+
+def validate_object_manifest(text, rows, component, report_path=None):
+    """Compare exact object multisets; reject all non-object stdout lines.
+
+    stderr is recorded separately by Recorder. No banner whitelist or arbitrary
+    output filtering belongs here. Full differences are retained in JSON when
+    called by the build; terminal examples are deliberately bounded.
+    """
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    pattern = r'_out/Darwin_x86_64/[A-Za-z0-9_.+-]+\.o'
+    objects = [line for line in lines if re.fullmatch(pattern, line)]
+    invalid = [line for line in lines if not re.fullmatch(pattern, line)]
+    outputs = [argv[argv.index('-o') + 1] for _, argv in rows]
+    expected, actual = Counter(outputs), Counter(objects)
+    missing, unexpected = expected - actual, actual - expected
+    duplicate_expected = {path: count for path, count in expected.items() if count != 1}
+    duplicate_actual = {path: count for path, count in actual.items() if count != 1}
+    invalid_outputs = [path for path in outputs if not re.fullmatch(pattern, path)]
+    report = {
+        'component': component, 'compiler_objects': len(outputs),
+        'manifest_lines': len(lines), 'manifest_objects': len(objects),
+        'missing': dict(missing), 'unexpected': dict(unexpected),
+        'duplicate_compile_objects': duplicate_expected,
+        'duplicate_manifest_objects': duplicate_actual,
+        'invalid_manifest_lines': invalid, 'invalid_compile_outputs': invalid_outputs,
+    }
+    valid = bool(outputs) and not any((missing, unexpected, duplicate_expected,
+                                      duplicate_actual, invalid, invalid_outputs))
+    report['status'] = 'passed' if valid else 'failed'
+    if report_path is not None:
+        save(report_path, report)
+    if not valid:
+        fail('Compile command/object manifest mismatch for ' + component
+             + ': compiler=' + str(len(outputs)) + ', manifest=' + str(len(lines))
+             + ', valid_objects=' + str(len(objects))
+             + '; missing=' + str(sum(missing.values())) + ' [' + _count_examples(missing) + ']'
+             + '; unexpected=' + str(sum(unexpected.values())) + ' [' + _count_examples(unexpected) + ']'
+             + '; duplicate_manifest=' + str(len(duplicate_actual)) + ' [' + _count_examples(duplicate_actual) + ']'
+             + '; duplicate_compile=' + str(len(duplicate_expected)) + ' [' + _count_examples(duplicate_expected) + ']'
+             + '; invalid_stdout=' + str(len(invalid)) + ' ' + repr([line[:200] for line in invalid[:5]])
+             + '; invalid_compile_outputs=' + str(len(invalid_outputs)) + ' ' + repr(invalid_outputs[:5]))
+    return objects
+
+
 def compile_commands(text):
     """Extract one argv per real C/C++ object rule, excluding make chatter."""
     rows = []
@@ -198,8 +262,10 @@ def compile_commands(text):
             fail('Linux return thunk survived the Darwin overlay')
         rows.append((line, argv))
     outputs = [argv[argv.index('-o') + 1] for _, argv in rows]
-    if len(outputs) != len(set(outputs)):
-        fail('Duplicate object in compile command recording')
+    duplicates = {path: count for path, count in Counter(outputs).items() if count > 1}
+    if duplicates:
+        fail('Duplicate object in compile command recording: ' + str(len(duplicates))
+             + ' [' + _count_examples(duplicates) + ']')
     return rows
 
 
@@ -223,14 +289,20 @@ class Recorder:
 
     def run(self, argv, cwd, name):
         argv = [str(a) for a in argv]
-        with self.log.open('a') as stream:
-            stream.write(json.dumps({'argv': argv, 'cwd': str(cwd), 'log': name}) + '\n')
-        print(name, flush=True)
         path = self.out / 'logs' / (name + '.log')
-        with path.open('w') as stream:
-            result = subprocess.run(argv, cwd=cwd, env=self.env, stdout=stream, stderr=subprocess.STDOUT)
+        stderr_path = self.out / 'logs' / (name + '.stderr.log')
+        with self.log.open('a') as stream:
+            stream.write(json.dumps({'argv': argv, 'cwd': str(cwd), 'log': name,
+                                     'stdout_log': str(path), 'stderr_log': str(stderr_path)}) + '\n')
+        print(name, flush=True)
+        # NVIDIA utils.mk probes LD_IS_LLD with $(shell $(LD) -v). Apple ld
+        # writes its version to stderr while make's target emits stdout data.
+        # Keep both streams, but never return diagnostics as object-list data.
+        with path.open('w') as stdout, stderr_path.open('w') as stderr:
+            result = subprocess.run(argv, cwd=cwd, env=self.env, stdout=stdout, stderr=stderr)
         if result.returncode:
-            fail('Command failed; inspect ' + str(path))
+            fail('Command failed (exit ' + str(result.returncode) + '); inspect '
+                 + str(path) + ' and ' + str(stderr_path))
         return path.read_text()
 
 
@@ -239,6 +311,8 @@ def build(args):
         fail('Compilation/linking require macOS; prepare and Linux tests are available here')
     if os.geteuid() == 0:
         fail('Run as an ordinary user; no administrator privileges are required')
+    from archives import validate_archive
+
     out, manifest = load_inputs(args.output)
     if (out / 'build-state.json').exists():
         fail('This is a single-attempt build directory; prepare a fresh output for retries')
@@ -266,9 +340,7 @@ def build(args):
         fail('Preflight did not pass')
     sdk = checks['sdk']['path']
     tools = {name: item['path'] for name, item in checks['tools'].items()}
-    for path in [sdk] + list(tools.values()):
-        if re.search(r'[^A-Za-z0-9_./+:-]', path):
-            fail('SDK/tool paths must not contain spaces or make/shell metacharacters: ' + path)
+    validate_make_paths(sdk, tools)
     env = {key: os.environ[key] for key in ('HOME', 'DEVELOPER_DIR') if key in os.environ}
     env.update(PATH='/usr/bin:/bin:/usr/sbin:/sbin', SDKROOT=sdk,
                TMPDIR=str(out / 'tmp'), LANG='C', LC_ALL='C', TZ='UTC',
@@ -297,10 +369,18 @@ def build(args):
         raw = record.run(make + ['-n', '-B', 'reference-objs'], cwd, component + '-commands')
         rows = compile_commands(raw)
         objects_text = record.run(make + ['reference-print-objs'], cwd, component + '-objects')
-        objects = [line.strip() for line in objects_text.splitlines() if line.strip()]
-        outputs = [argv[argv.index('-o') + 1] for _, argv in rows]
-        if set(objects) != set(outputs) or len(objects) != len(rows):
-            fail('Compile command/object manifest mismatch for ' + component)
+        objects = validate_object_manifest(objects_text, rows, component,
+                                           out / (component + '-manifest-check.json'))
+        archive_path = cwd / '_out/Darwin_x86_64' / archive
+        archive_report_path = out / (component + '-archive-check.json')
+        try:
+            archive_report = validate_archive(archive_path, objects)
+        except ValueError as error:
+            save(archive_report_path, {'status': 'failed', 'archive': str(archive_path),
+                                       'error': str(error)})
+            fail('Archive validation failed for ' + component + ': ' + str(error))
+        archive_report['status'] = 'passed'
+        save(archive_report_path, archive_report)
         (cwd / '_out/Darwin_x86_64/compile_cmds.sh').write_text('\n'.join(line for line, _ in rows) + '\n')
         save(out / (component + '-objects.json'), objects)
         commands[component] = rows

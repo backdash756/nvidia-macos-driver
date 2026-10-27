@@ -607,9 +607,9 @@ class PreparedInputTests(unittest.TestCase):
                 dry_run = subprocess.check_output(args + ['-n', '-B', 'reference-objs'],
                     cwd=cwd, text=True, stderr=subprocess.PIPE, timeout=120)
                 rows = RUNNER.compile_commands(dry_run)
-                objects = subprocess.check_output(args + ['reference-print-objs'],
-                    cwd=cwd, text=True, stderr=subprocess.PIPE, timeout=120).splitlines()
-                objects = [line.strip() for line in objects if line.strip()]
+                objects_text = subprocess.check_output(args + ['reference-print-objs'],
+                    cwd=cwd, text=True, stderr=subprocess.PIPE, timeout=120)
+                objects = RUNNER.validate_object_manifest(objects_text, rows, component)
                 outputs = [argv[argv.index('-o') + 1] for _, argv in rows]
                 self.assertGreater(len(rows), 200)
                 self.assertEqual(Counter(objects), Counter(outputs))
