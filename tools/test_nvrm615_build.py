@@ -35,10 +35,12 @@ RUNNER = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(RUNNER)
 COMPARE_SPEC = importlib.util.spec_from_file_location('nvrm615_compare', RECIPE / 'compare.py')
 COMPARE = importlib.util.module_from_spec(COMPARE_SPEC)
-COMPARE_SPEC.loader.exec_module(COMPARE)
+with mock.patch.object(sys, 'path', [str(RECIPE), *sys.path]):
+    COMPARE_SPEC.loader.exec_module(COMPARE)
 PREFLIGHT_SPEC = importlib.util.spec_from_file_location('nvrm615_preflight', RECIPE / 'preflight.py')
 PREFLIGHT = importlib.util.module_from_spec(PREFLIGHT_SPEC)
-PREFLIGHT_SPEC.loader.exec_module(PREFLIGHT)
+with mock.patch.object(sys, 'path', [str(RECIPE), *sys.path]):
+    PREFLIGHT_SPEC.loader.exec_module(PREFLIGHT)
 VENDOR = None
 
 
@@ -439,6 +441,8 @@ class PreparedInputTests(unittest.TestCase):
         self.assertEqual(manifest['nullmoth_commit'], RUNNER.NULLMOTH)
         self.assertEqual(manifest['nvidia_commit'], RUNNER.NVIDIA)
         self.assertIs(manifest['diagnostic_enabled'], False)
+        self.assertEqual(manifest['recipe_sha256']['macho.py'],
+                         RUNNER.sha(self.recipe / 'macho.py'))
 
     def test_baseline_uses_release_snapshot_without_diagnostics_or_fork_power(self):
         kext = self.output / 'nullmoth/kexts/NVRM'

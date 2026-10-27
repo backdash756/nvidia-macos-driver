@@ -13,6 +13,8 @@ import shutil
 import subprocess
 import sys
 
+from macho import is_kext_bundle, parse_mach_header
+
 
 LIMITATION = (
     "These static checks do not establish KAPI structure layout, semantic equivalence, "
@@ -41,19 +43,6 @@ def parse_symbols(output):
             rows.append({"address": int(address, 16) if address else None,
                          "kind": kind, "name": name})
     return rows
-
-
-def parse_mach_header(output):
-    """Read otool -hv's filetype column, not a substring of its filename."""
-    lines = output.splitlines()
-    for index, line in enumerate(lines):
-        fields = line.split()
-        if "magic" in fields and "filetype" in fields and index + 1 < len(lines):
-            values = lines[index + 1].split()
-            if len(values) > fields.index("filetype"):
-                return {"filetype": values[fields.index("filetype")],
-                        "header": lines[index + 1].strip()}
-    raise ValueError("Cannot parse Mach-O header")
 
 
 def parse_load_commands(output):
@@ -196,9 +185,8 @@ def compare(reference, candidate):
     rejected, review = [], []
     if candidate["architectures"] != reference["architectures"] or candidate["architectures"] != ["x86_64"]:
         rejected.append("Architecture mismatch; both inputs must be thin x86_64 NVRM images")
-    accepted_types = ("KEXT_BUNDLE", "MH_KEXT_BUNDLE", "11", "0xb")
-    if (reference["mach_header"]["filetype"] not in accepted_types
-            or candidate["mach_header"]["filetype"] not in accepted_types):
+    if (not is_kext_bundle(reference["mach_header"])
+            or not is_kext_bundle(candidate["mach_header"])):
         rejected.append("Both Mach-O inputs must have the kext bundle file type")
     for key, expected in (("CFBundleIdentifier", "com.nullmoth.NVRM"), ("CFBundleExecutable", "NVRM")):
         if reference["metadata"].get(key) != expected or candidate["metadata"].get(key) != expected:

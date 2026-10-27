@@ -1,6 +1,6 @@
 # Isolated NVRM 615 reference build for NullMoth 2.5.4
 
-The public NvGfx Darwin harness closes the previously missing RM/NVKMS archive and final NVRM link recipe. A complete source-based reference build can now be attempted without obtaining unpublished prebuilt NVIDIA archives. This branch prepares that attempt; **no macOS compilation, final NVRM link, official 2.5.4 binary comparison, installation, or hardware test has been performed here**.
+The public NvGfx Darwin harness closes the previously missing RM/NVKMS archive and final NVRM link recipe. A complete source-based reference build can now be attempted without obtaining unpublished prebuilt NVIDIA archives. This branch prepares that attempt; **the complete NVRM compilation/link, official 2.5.4 binary comparison and hardware validation remain untested here**. The local macOS capability-probe results reported below are separate from a complete NVRM build.
 
 The build is deliberately reference-only. It uses the pinned NullMoth 2.5.4 sources, the existing display-completion/validation-log/viewport/backlight patches, and NVIDIA 615.78.08. It does not include our YUV420 diagnostic or NvGfx's laptop power/physical-control modifications. The source `0.1` KMOD and plist versions remain unchanged. The output is a development artifact, not an official 2.5.4 package or an installation-ready replacement.
 
@@ -79,17 +79,39 @@ Header existence alone is insufficient. The preflight syntax-checks and compiles
 
 Firmware, NVAccel, NVRMFB, NVRMAGDC, Mesa/NVK, Rust and the shader translator do not have to be rebuilt for this reference. Existing GSP 615 firmware remains a later runtime prerequisite, not a generated build input.
 
+### Mach-O header correction and reported macOS checks
+
+On Tahoe 26.7.1 / x86_64, the user confirmed successful SDK/header checks, kernel C++ syntax checking, probe-object compilation, kernel Mach-O linking and `lipo` architecture checking. An independent `nm -u` check also returned zero. The original preflight stopped solely because Apple's actual verbose header prints `KEXTBUNDLE`, while the check expected `KEXT_BUNDLE`:
+
+```text
+magic       cputype  cpusubtype  caps  filetype    ncmds
+MH_MAGIC_64 X86_64   ALL         0x00  KEXTBUNDLE 7
+```
+
+[macho.py](../build/nvrm615/macho.py) now supplies the single header parser and kext-type predicate used by both preflight and comparison. They read the actual `filetype` column of exactly one valid header table; filenames and unrelated text are not type evidence. Accepted representations are `KEXTBUNDLE`, `KEXT_BUNDLE`, `MH_KEXT_BUNDLE`, and numeric `MH_KEXT_BUNDLE` value 11 / `0xb` (including equivalent hexadecimal formatting). Executables, dylibs, ordinary bundles and malformed/ambiguous headers remain rejected.
+
+After recognizing the header, the preflight still requires a successful `nm -u` call before recording artifact hashes and `status: passed` in `preflight.json`. A symbol-tool failure is not ignored. Linux regression tests simulate the complete tool sequence using the actual header above, including the saved success/failure reports; they do not run Apple's compiler or tools. The corrected preflight must still be rerun on macOS. The user's earlier successful probes are reported observations, not a newly executed macOS test of this commit.
+
 ## Commands: preparation and build only
 
 Review the committed helpers before running them. Use an ordinary account without `sudo`. All output goes into a new dedicated directory outside either source checkout; existing outputs are not overwritten or recursively cleaned. Use simple absolute build paths and SDK/tool paths without spaces or shell/make metacharacters; NVIDIA's Makefile command expansion requires this restriction. No helper installs, loads, creates Kernel Collections, or changes EFI/NVRAM/SIP.
 
+To update an existing checkout manually, run these commands from its repository root. They do not rewrite divergent history; a non-fast-forward update stops instead:
+
+```bash
+git switch build/nvrm-615-reference
+git pull --ff-only origin build/nvrm-615-reference
+```
+
 For an early CLT/SDK capability check on the Mac, before the larger build:
 
 ```bash
-python3 build/nvrm615/preflight.py --output "$HOME/nvrm-builds/clt-check-001"
+mkdir -p "$HOME/nvrm-builds"
+python3 build/nvrm615/preflight.py \
+  --output "$(mktemp -d "$HOME/nvrm-builds/clt-check.XXXXXX")"
 ```
 
-For a specific already installed SDK, append `--sdk /absolute/path/to/MacOSX.sdk`. A new output directory is required for another attempt.
+For a specific already installed SDK, append `--sdk /absolute/path/to/MacOSX.sdk`. A new output directory is required for another attempt; the command above creates a unique empty directory, which the preflight accepts. Its printed path identifies the resulting `preflight.json`.
 
 Obtain the NVIDIA source in a separate directory; a clone is a download, not an installation:
 
@@ -98,12 +120,16 @@ git clone --depth 1 --branch 615.78.08 https://github.com/NVIDIA/open-gpu-kernel
 git -C "$HOME/nvrm-inputs/open-gpu-615" rev-parse HEAD
 ```
 
-The resolved commit must match the NVIDIA pin above. From this branch's repository root:
+The resolved commit must match the NVIDIA pin above. The pinned NullMoth source commit must also already exist in local Git history. The user's earlier shallow-clone issue has been resolved locally; the helpers perform no automatic fetch, unshallow operation or history rewrite.
+
+**After updating the build helpers, prepare a new reference output directory.** Existing `854d272` preparations intentionally fail the recipe-hash check, including after adding the shared parser. Do not edit old manifests or reuse partial builds; retain their logs and choose a fresh path such as `reference-002` for the example below. The unchanged single-attempt build policy still applies.
+
+From this branch's repository root (the example requires a directory that does not yet exist):
 
 ```bash
 python3 build/nvrm615/build.py prepare \
   --vendor "$HOME/nvrm-inputs/open-gpu-615" \
-  --output "$HOME/nvrm-builds/reference-001"
+  --output "$HOME/nvrm-builds/reference-002"
 ```
 
 Preparation also works under Linux. It materializes independent Git archives, not shared clones or dirty working-tree files, and applies the baseline patches strictly. It records every staged input hash and the build-recipe hashes in `inputs.json`. It does not compile. To compile later, run preparation on the Mac rather than moving its path-bound output directory.
@@ -112,14 +138,14 @@ After providing a complete backed-up official 2.5.4 reference bundle outside the
 
 ```bash
 python3 build/nvrm615/build.py build \
-  --output "$HOME/nvrm-builds/reference-001" \
+  --output "$HOME/nvrm-builds/reference-002" \
   --reference "$HOME/nvrm-reference/2.5.4/NVRM.kext" \
   --jobs 4
 ```
 
 Append `--sdk /absolute/path/to/MacOSX.sdk` if needed. The build performs its own preflight, refuses changed inputs/recipe hashes, builds both archives and the fixed glue list, links and signs the staged candidate, then **requires** the static comparison; a missing reference is an error. A build directory permits one attempt only, avoiding stale SDK/flag/object reuse. For a failed attempt, retain its logs and prepare a new output directory.
 
-These macOS command paths are prepared but have not been executed here. Do not interpret Linux preparation success as a completed Darwin build.
+The corrected macOS preflight and the full build/compare command paths have not been executed here. Do not interpret Linux preparation success as a completed Darwin build.
 
 ## Outputs, metadata and comparison
 
@@ -148,10 +174,11 @@ NvGfx's original report tools are useful evidence but not an automatic compatibi
 Linux checks cover Python/CLI guards, actual pinned-source extraction, strict patch order/final hashes, duplicate/tamper rejection, diagnostic exclusion, and compile-command/template parsing. The existing diagnostic patch can be checked for later applicability without applying it to this reference. The corresponding test command is:
 
 ```bash
+python3 tools/test_nvrm615_macho.py
 python3 tools/test_nvrm615_build.py --vendor /absolute/path/to/open-gpu-615
 ```
 
-The completed Linux run passed 39 tests, including real Makefile dry runs covering 1100 RM and 225 NVKMS objects and native syntax/format checks of both complete baseline-patched C files. These Makefile checks use the Linux host compiler and do not qualify Apple Clang flags or Mach-O output. The command output is the authoritative test result. macOS-specific preflight, full compilation, Mach-O archives/link/signing, official 2.5.4 comparison, boot and RTX 5080 display behavior remain open. An author-reported RTX 5070 laptop boot is not a substitute for these checks.
+The original baseline Linux run passed 39 tests, including real Makefile dry runs covering 1100 RM and 225 NVKMS objects and native syntax/format checks of both complete baseline-patched C files. These Makefile checks use the Linux host compiler and do not qualify Apple Clang flags or Mach-O output. The command output is the authoritative test result. The updated Linux validation passed all 39 baseline tests and 14 new Mach-O regressions (53 total). The Mach-O regressions cover the real Apple header, accepted constant representations, negative file types, malformed headers, comparison decisions and the complete simulated preflight through symbol checking and JSON output. The corrected macOS preflight, complete NVRM compilation, Mach-O archives/link/signing, official 2.5.4 comparison, boot and RTX 5080 display behavior remain open. An author-reported RTX 5070 laptop boot is not a substitute for these checks.
 
 Only after the unchanged reference compiles and its official 2.5.4 comparison has been reviewed should a separate diagnostic output be prepared. The later change is small: use the same baseline/toolchain, add the existing vendor diagnostic patch, pair it with the existing `os-nvkms-xnu.cpp` hook, rebuild the affected NVKMS objects/archive and XNU hook, and relink NVRM. The present runner has no diagnostic-enable option and does not perform that integration automatically.
 

@@ -20,6 +20,8 @@ import shutil
 import subprocess
 import sys
 
+from macho import is_kext_bundle, parse_mach_header
+
 
 MINIMUM_MACOS = "15.0"
 KEY_HEADERS = (
@@ -299,8 +301,9 @@ def perform_checks(report, output, sdk_argument):
     if archs != ["x86_64"]:
         raise RuntimeError("Probe is not exclusively x86_64: " + " ".join(archs))
     header = command(report, [tools["otool"]["path"], "-hv", binary], cwd=output, env=env).stdout
-    if "KEXT_BUNDLE" not in header:
-        raise RuntimeError("Probe Mach-O file type is not KEXT_BUNDLE")
+    report["mach_header"] = parse_mach_header(header)
+    if not is_kext_bundle(report["mach_header"]):
+        raise RuntimeError("Probe Mach-O file type is not MH_KEXT_BUNDLE")
     command(report, [tools["nm"]["path"], "-u", binary], cwd=output, env=env)
     report["artifacts"] = {
         path.name: {"sha256": sha256(path), "size_bytes": path.stat().st_size}
