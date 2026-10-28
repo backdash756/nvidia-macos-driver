@@ -22,14 +22,16 @@ The additional A/B queries do not run without the `nvyuv420diag` boot argument. 
 
 ## Execution flow
 
-The diagnostic starts when `GetDisplayMode()` first returns a candidate with 3840×2160 and 59–61 Hz for a selected ID:
+In the original patch, the diagnostic starts when `GetDisplayMode()` first returns a candidate with 3840×2160 and 59–61 Hz for a selected ID. The separate `615-yuv420-trigger-overview.patch` used by the current isolated build removes that prerequisite: the first successful non-end normal result of a selected ID starts it, including 4K30 or lower resolutions. The original patch and its historical SHA-256 remain unchanged. The following A/B sequence is unchanged:
 
 1. Pass **A** starts at mode index 0 with the existing default parameters.
 2. Once that pass ends, pass **B** starts again at mode index 0. Only `preferYUV420` is additionally enabled.
 3. The selection parameters remain constant within each pass. Both passes use their own freshly initialized requests.
-4. For matching 4K candidates, the internal mode and a local round trip through the KAPI conversions are logged. The converted copies are not passed to a modeset.
+4. For matching 4K60 candidates, the internal mode and a local round trip through the KAPI conversions are logged. The converted copies are not passed to a modeset.
 
 Only `VALIDATE_MODE_INDEX` queries are added. There is no additional modeset or commit call, and no safety or bandwidth checks are disabled. NVKMS validation can nevertheless use internal caches and hardware queries; this diagnostic does not establish that all hardware accesses are free of side effects. The additional queries and logging can increase boot time.
+
+The follow-up also reports up to eight `overview=4K30` records per pass for 3840×2160 / 29–31 Hz. `matches30` counts all observed candidates in that range; `logged30` counts the displayed records. The existing `matches` count still means 4K60. Thus zero 4K60 matches can still accompany an informative 4K30 overview.
 
 Each pass is limited to 512 queries. Only an end-of-list response from NVKMS produces `COMPLETE`. Reaching the limit or encountering a query failure produces `INCOMPLETE`; allocation and IOCTL failures are reported as `ABORT`. An incomplete pass must not be treated as a complete comparison.
 
@@ -38,6 +40,8 @@ The candidate list can depend on the validation parameters. **Match A and B by s
 <a id="anwenden-auf-den-nvidia-quellbaum"></a>
 
 ## Applying the patch to the NVIDIA source tree
+
+The manual commands below describe the historical original patch only. The current trigger correction is a separate patch, applied automatically by the isolated [yuv420-diag-002 build workflow](NVRM-615-YUV420-EXPERIMENT.md) after the original pair and baseline. Do not apply either patch to existing builds.
 
 An external NVIDIA **615.78.08** tree matching the existing NullMoth build is required. Set the following variables to the actual local directories:
 
@@ -93,7 +97,7 @@ log show --last 30m --style compact \
   --predicate 'eventMessage CONTAINS "Y420-AB"'
 ```
 
-Also retain the NVRMFB enumeration so that `dpy=0x...` can be mapped to the physical signal path. Without `BEGIN` lines, there is no evidence that the diagnostic ran. Possible reasons include a missing argument, a mismatched build, an incorrect target ID, or no queried candidate within the filter range.
+Also retain the NVRMFB enumeration so that `dpy=0x...` can be mapped to the physical signal path. Without `BEGIN` lines, there is no evidence that the diagnostic ran. Possible reasons include a missing argument, a mismatched build, an incorrect target ID, or no successful non-end normal result. For the historical original patch alone, a normal candidate within its old 4K60 trigger filter was also required.
 
 <a id="ausgabe-interpretieren"></a>
 
@@ -117,6 +121,8 @@ Each output line carries `Y420-AB`, the display ID, and, for the passes, `pass=A
 | `valid` | Result of the corresponding internal validation. |
 | `yuv420`, `roundtrip`, `lost` | Internal enum before KAPI conversion, enum after the local round trip, and an indicator of a difference. |
 | `info:` | Existing NVKMS validation text with the additional diagnostic values. |
+| `overview=4K30` | Follow-up only: bounded one-line overview for 3840×2160 / 29–31 Hz, at most eight per pass. |
+| `matches`, `matches30`, `logged30` | Follow-up summary: detailed 4K60 matches, all observed 4K30 candidates and the bounded number of 4K30 overview records. |
 
 The info buffer is limited to `NVKMS_MODE_VALIDATION_MAX_INFO_STRING_LENGTH`, which is 2048 bytes in the examined revision. Output is split into short lines. `INFO_MAY_BE_TRUNCATED` means that text at the end of the buffer may be missing; a missing rejection reason must not then be interpreted as success. If validation fails before output color selection, no `final format`/BPC line is expected. That also does not establish any particular color depth.
 

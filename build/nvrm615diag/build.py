@@ -25,6 +25,8 @@ SPEC.loader.exec_module(BASE)
 KIND = 'yuv420-ab-experiment'
 BASE_COMMIT = '2e9f435637ff44164ba0355ae8904f15935c2f5a'
 DIAG_COMMIT = 'ff37f3812fe170610885081f3a9cb223eb580938'
+FOLLOWUP_PARENT = '61c581ed679ebec7be9685eecf0bad991671da82'
+FOLLOWUP_SOURCE = 'ogkm/src/nvidia-modeset/kapi/src/nvkms-kapi.c'
 
 
 def recipe_hashes():
@@ -36,12 +38,35 @@ def load_proof():
     proof = json.loads((HERE / 'proof.json').read_text())
     if (proof['format'], proof['experiment_base_commit'], proof['diagnostic_source_commit'],
             proof['nullmoth_commit'], proof['nvidia_commit']) != (
-            1, BASE_COMMIT, DIAG_COMMIT, BASE.NULLMOTH, BASE.NVIDIA):
+            2, BASE_COMMIT, DIAG_COMMIT, BASE.NULLMOTH, BASE.NVIDIA):
         BASE.fail('Unexpected diagnostic provenance pins')
+    historical = json.loads(subprocess.check_output(['git', '-C', str(REPO), 'show',
+        FOLLOWUP_PARENT + ':build/nvrm615diag/proof.json']))
+    for key in ('diagnostic_patch', 'xnu_hook', 'expected_changed_objects',
+                'allowed_extra_exports', 'reference_recipe_sha256', 'baseline_patch_proof_sha256'):
+        if proof[key] != historical[key]:
+            BASE.fail('Historical diagnostic provenance must remain unchanged: ' + key)
+    if proof['historical_source_changes'] != historical['source_changes']:
+        BASE.fail('Historical diagnostic source hashes must remain unchanged')
+    followup = proof['followup_patch']
+    if (followup['path'], followup['parent_commit'], followup['apply_directory']) != (
+            'patches/615-yuv420-trigger-overview.patch', FOLLOWUP_PARENT, 'src/nvidia-modeset'):
+        BASE.fail('Unexpected diagnostic follow-up provenance or scope')
+    if set(followup['source_changes']) != {FOLLOWUP_SOURCE}:
+        BASE.fail('The trigger follow-up must modify only the NVKMS KAPI source')
+    transition = followup['source_changes'][FOLLOWUP_SOURCE]
+    expected = copy.deepcopy(historical['source_changes'])
+    if transition['before_sha256'] != expected[FOLLOWUP_SOURCE]['after_sha256']:
+        BASE.fail('Follow-up preimage must match the historical diagnostic output')
+    expected[FOLLOWUP_SOURCE]['after_sha256'] = transition['after_sha256']
+    if (proof['source_changes'] != expected or proof['patch_order'] != historical['patch_order']
+            + ['diagnostic:615-yuv420-trigger-overview.patch']):
+        BASE.fail('Unexpected follow-up source transition or patch order')
     if BASE.sha(BASE_DIR / 'patches/patch-proof.json') != proof['baseline_patch_proof_sha256']:
         BASE.fail('The complete five-patch baseline must remain unchanged')
     patch, hook = proof['diagnostic_patch'], proof['xnu_hook']
     for path, digest in ((REPO / patch['path'], patch['sha256']),
+                         (HERE / followup['path'], followup['sha256']),
                          (HERE / hook['path'], hook['sha256']),
                          (REPO / hook['source_path'], hook['source_sha256'])):
         if path.is_symlink() or BASE.sha(path) != digest:
@@ -95,6 +120,20 @@ def expected_sources(baseline, proof):
     return maps
 
 
+def apply_followup(out, proof):
+    """Apply the separately recorded correction only to its exact preimage."""
+    entry = proof['followup_patch']
+    path = HERE / entry['path']
+    if BASE.sha(path) != entry['sha256']:
+        BASE.fail('Diagnostic follow-up patch hash changed')
+    BASE.verify_hashes(out, {name: change['before_sha256']
+                             for name, change in entry['source_changes'].items()})
+    strict_patch(out / 'ogkm', path, ('src/nvidia-modeset/kapi/src/nvkms-kapi.c',),
+                 entry['apply_directory'])
+    BASE.verify_hashes(out, {name: change['after_sha256']
+                             for name, change in entry['source_changes'].items()})
+
+
 def prepare(args):
     out = new_output(args.output)
     proof = load_proof()
@@ -112,6 +151,9 @@ def prepare(args):
                   'src/nvidia-modeset/src/nvkms-modepool.c'), 'src/nvidia-modeset')
     strict_patch(out / 'nullmoth', HERE / proof['xnu_hook']['path'],
                  ('kexts/NVRM/os-nvkms-xnu.cpp',))
+    BASE.verify_hashes(out, {path: change['after_sha256']
+                             for path, change in proof['historical_source_changes'].items()})
+    apply_followup(out, proof)
     BASE.verify_hashes(out, {path: change['after_sha256']
                              for path, change in proof['source_changes'].items()})
     for folder, key in (('ogkm', 'vendor_sha256'), ('nullmoth', 'nullmoth_sha256')):

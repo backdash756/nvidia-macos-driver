@@ -15,7 +15,33 @@
     "glue/os-nvkms-xnu.o"
   ],
   "experiment_base_commit": "2e9f435637ff44164ba0355ae8904f15935c2f5a",
-  "format": 1,
+  "followup_patch": {
+    "apply_directory": "src/nvidia-modeset",
+    "parent_commit": "61c581ed679ebec7be9685eecf0bad991671da82",
+    "path": "patches/615-yuv420-trigger-overview.patch",
+    "sha256": "9470404eaa6fcc338c32efb82606010af14fe79aa2e92c7c0826232bccf95aa0",
+    "source_changes": {
+      "ogkm/src/nvidia-modeset/kapi/src/nvkms-kapi.c": {
+        "after_sha256": "d25439b4c3ea42a2e739227b34c1ce12d94c4c6441680bbd7a0774c9c07e1481",
+        "before_sha256": "5fda13a23642a936566ac63dc6e4f32f46481124b8c7e138e0efa31d5872a864"
+      }
+    }
+  },
+  "format": 2,
+  "historical_source_changes": {
+    "nullmoth/kexts/NVRM/os-nvkms-xnu.cpp": {
+      "after_sha256": "ec27b73112ea5e029a2da46ce10953ef72a522dd1e2de319bd678334570ad37d",
+      "before_sha256": "35bbdaa805dc2e727550b30b09d6e0626dc0f2e15779047f5340046279fa4861"
+    },
+    "ogkm/src/nvidia-modeset/kapi/src/nvkms-kapi.c": {
+      "after_sha256": "5fda13a23642a936566ac63dc6e4f32f46481124b8c7e138e0efa31d5872a864",
+      "before_sha256": "ff0f957733b1576ad5ddd6e6c60c33f899c71f0010e52b1c078f90011203ae81"
+    },
+    "ogkm/src/nvidia-modeset/src/nvkms-modepool.c": {
+      "after_sha256": "736c8d3e2ad51c23f1dc0bff1be93d28c4263991a08272a90c8b59936b48cecb",
+      "before_sha256": "c63c1c1414bf54377fef8624aabeaf24fa64bcffad8eeb44ecd47e3efee6f3f7"
+    }
+  },
   "nullmoth_commit": "46779055f68208baa5ddfb9b2e9c77ed028e1d59",
   "nvidia_commit": "1a82fbfda8f321b056eb3568850f9316c5e465c5",
   "patch_order": [
@@ -25,7 +51,8 @@
     "baseline:615-backlight-register-log.patch",
     "baseline:615-timer-callback-clear.patch",
     "diagnostic:615-yuv420-diagnostic.patch",
-    "diagnostic:xnu-yuv420-hook.patch"
+    "diagnostic:xnu-yuv420-hook.patch",
+    "diagnostic:615-yuv420-trigger-overview.patch"
   ],
   "reference_recipe_sha256": {
     "archives.py": "b3043ed407b1bf687c228df2ddadd471fb227d3af7d38adf9908058c2c05f6df",
@@ -49,7 +76,7 @@
       "before_sha256": "35bbdaa805dc2e727550b30b09d6e0626dc0f2e15779047f5340046279fa4861"
     },
     "ogkm/src/nvidia-modeset/kapi/src/nvkms-kapi.c": {
-      "after_sha256": "5fda13a23642a936566ac63dc6e4f32f46481124b8c7e138e0efa31d5872a864",
+      "after_sha256": "d25439b4c3ea42a2e739227b34c1ce12d94c4c6441680bbd7a0774c9c07e1481",
       "before_sha256": "ff0f957733b1576ad5ddd6e6c60c33f899c71f0010e52b1c078f90011203ae81"
     },
     "ogkm/src/nvidia-modeset/src/nvkms-modepool.c": {

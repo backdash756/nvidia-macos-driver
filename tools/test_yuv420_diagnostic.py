@@ -4,8 +4,9 @@
 Usage: python3 tools/test_yuv420_diagnostic.py --vendor /path/to/open-gpu-kernel-modules
    or: python3 tools/test_yuv420_diagnostic.py --prepared-build /path/to/new/diagnostic
 
-The supplied NVIDIA 615.78.08 tree is read-only. The patch is applied and
-reversed in a temporary directory. The C harness compiles the actual patched
+The supplied NVIDIA 615.78.08 tree is read-only. The original and follow-up
+patches are applied and reversed in a temporary directory. --historical checks
+only the original patch and its original twelve scenarios. The C harness compiles the actual patched
 KAPI functions and the actual macOS opt-in hook; it models ioctl responses,
 allocation failures and boot arguments, rather than a display engine. This
 checks diagnostic behavior, not real EDID parsing, link training or a Mac boot.
@@ -21,6 +22,7 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 PATCH = ROOT / 'kexts/NVRM/patches/615-yuv420-diagnostic.patch'
+FOLLOWUP = ROOT / 'build/nvrm615diag/patches/615-yuv420-trigger-overview.patch'
 
 
 def cut(source, start, end):
@@ -54,6 +56,7 @@ typedef NvU32 NvKmsKapiDisplay;
 #define NVKMS_MODE_VALIDATION_NO_RRX1K_CHECK 0x800
 #define NVKMS_KAPI_MODE_NAME_LEN 32
 #define NVKMS_MODE_VALIDATION_MAX_INFO_STRING_LENGTH 2048
+#define FOLLOWUP_ACTIVE @FOLLOWUP_ACTIVE@
 '''
 
 DOUBLES = r'''
@@ -88,7 +91,7 @@ static char logs[131072];
 static size_t log_length;
 static NvU32 next_index[2];
 static int last_pass = -1;
-static NvBool normal_error, normal_end, normal_other;
+static NvBool normal_error, normal_end, normal_other, normal_30;
 
 static bool PE_parse_boot_argn(const char *name, void *value, int length) {
     assert(strcmp(name, "nvyuv420diag") == 0 && length == sizeof(target_mask));
@@ -134,6 +137,22 @@ static struct NvKmsMode mode420(enum NvYuv420Mode yuv) {
     };
     strcpy(m.name, "3840x2160"); return m;
 }
+static struct NvKmsMode mode30(void) {
+    struct NvKmsMode m = mode420(NV_YUV420_MODE_NONE);
+    m.timings.pixelClockHz = 297000000;
+    m.timings.RRx1k = 30000;
+    return m;
+}
+static struct NvKmsMode normal_mode(void) {
+    struct NvKmsMode m = normal_30 ? mode30() : mode420(NV_YUV420_MODE_NONE);
+    if (normal_other) {
+        m.timings.pixelClockHz = 74250000; m.timings.RRx1k = 30000;
+        m.timings.hVisible = 1920; m.timings.vVisible = 1080;
+        m.timings.hSyncStart = 2008; m.timings.hSyncEnd = 2052; m.timings.hTotal = 2200;
+        m.timings.vSyncStart = 1084; m.timings.vSyncEnd = 1089; m.timings.vTotal = 1125;
+    }
+    return m;
+}
 static NvBool nvkms_ioctl_from_kapi(void *open, NvU32 cmd, void *params, size_t bytes) {
     struct NvKmsValidateModeIndexParams *p = params;
     assert(open == (void *)(uintptr_t)0x123 && cmd == NVKMS_IOCTL_VALIDATE_MODE_INDEX);
@@ -150,8 +169,7 @@ static NvBool nvkms_ioctl_from_kapi(void *open, NvU32 cmd, void *params, size_t 
         assert(!p->request.modeValidation.preferYUV420 && !p->request.infoStringSize);
         if (normal_error) return NV_FALSE;
         p->reply.end = normal_end;
-        p->reply.mode = mode420(NV_YUV420_MODE_NONE);
-        if (normal_other) p->reply.mode.timings.hVisible = 1920;
+        p->reply.mode = normal_mode();
         p->reply.valid = NV_FALSE;
         p->reply.preferredMode = NV_TRUE;
         return NV_TRUE;
@@ -161,17 +179,35 @@ static NvBool nvkms_ioctl_from_kapi(void *open, NvU32 cmd, void *params, size_t 
     last_pass = (int)pass;
     assert(p->request.modeIndex == next_index[pass]++);
     diag_calls[pass]++;
+    assert(p->request.modeIndex < 512);
+    const unsigned char fresh_reply[sizeof(p->reply)] = {0};
+    assert(memcmp(&p->reply, fresh_reply, sizeof(fresh_reply)) == 0);
     assert(p->request.infoStringSize == NVKMS_MODE_VALIDATION_MAX_INFO_STRING_LENGTH);
     char *info = (char *)(uintptr_t)p->request.pInfoString;
     for (unsigned i = 0; i < p->request.infoStringSize; i++) assert(info[i] == 0);
-    if (strcmp(scenario, "ioerror") == 0 && pass == 0 && p->request.modeIndex == 1)
+    if ((strcmp(scenario, "ioerror") == 0 && pass == 0 && p->request.modeIndex == 1) ||
+        strcmp(scenario, "ioerrorfirst") == 0)
         return NV_FALSE;
+    if (strcmp(scenario, "diagempty") == 0) {
+        p->reply.end = NV_TRUE; return NV_TRUE;
+    }
+    if (strcmp(scenario, "only30") == 0 || strcmp(scenario, "bound30") == 0) {
+        if (strcmp(scenario, "only30") == 0 && p->request.modeIndex == 2) {
+            p->reply.end = NV_TRUE; return NV_TRUE;
+        }
+        p->reply.mode = mode30(); p->reply.source = 1; p->reply.valid = NV_TRUE;
+        return NV_TRUE;
+    }
     if (strcmp(scenario, "bound") == 0) {
         p->reply.mode.timings.hVisible = 1920; return NV_TRUE;
     }
     unsigned match_index = pass ? 3 : 1;
     p->reply.end = p->request.modeIndex > match_index;
     if (p->reply.end) return NV_TRUE;
+    if (strcmp(scenario, "mixed") == 0 && p->request.modeIndex == 0) {
+        p->reply.mode = mode30(); p->reply.source = 1; p->reply.valid = NV_TRUE;
+        return NV_TRUE;
+    }
     p->reply.mode = mode420(pass ?
         (strcmp(scenario, "sw") == 0 ? NV_YUV420_MODE_SW : NV_YUV420_MODE_HW)
         : NV_YUV420_MODE_NONE);
@@ -193,6 +229,11 @@ static NvBool nvkms_ioctl_from_kapi(void *open, NvU32 cmd, void *params, size_t 
 
 CHECKS = r'''
 static void expect(const char *message) { assert(strstr(logs, message)); }
+static unsigned occurrences(const char *message) {
+    unsigned count = 0;
+    for (const char *p = logs; (p = strstr(p, message)) != NULL; p += strlen(message)) count++;
+    return count;
+}
 static void *claim_thread(void *result) {
     *(NvBool *)result = nvkms_yuv420_diag_claim(8); return NULL;
 }
@@ -232,36 +273,76 @@ int main(int argc, char **argv) {
     assert(argc==2); scenario=argv[1];
     if (!strcmp(scenario,"claim")) { check_claim(); puts("PASS claim: opt-in, targets, one-bit IDs, CAS retry, concurrent once"); return 0; }
     check_conversion();
-    opt_in=strcmp(scenario,"off")!=0;
-    normal_error=!strcmp(scenario,"normalerror");
+    opt_in=strcmp(scenario,"off")!=0 && strcmp(scenario,"off30")!=0;
+    normal_error=!strcmp(scenario,"normalerror") || !strcmp(scenario,"normalretry");
     normal_end=!strcmp(scenario,"end");
     normal_other=!strcmp(scenario,"other");
+    normal_30=!strcmp(scenario,"only30") || !strcmp(scenario,"mixed") ||
+              !strcmp(scenario,"diagempty") || !strcmp(scenario,"bound30") ||
+              !strcmp(scenario,"off30");
+    if (!strcmp(scenario,"unselected")) target_mask=0x4000;
     if (!strcmp(scenario,"oom1")) fail_allocation=1;
     if (!strcmp(scenario,"oom2")) fail_allocation=2;
     struct NvKmsKapiDevice device={7,9,(void *)(uintptr_t)0x123};
     struct NvKmsKapiDisplayMode output, expected;
     NvBool valid=99, preferred=99;
     memset(&output,0xa5,sizeof(output));
+    unsigned char untouched[sizeof(output)];
+    memcpy(untouched, &output, sizeof(output));
     assert(GetDisplayMode(NULL,0x400,3,&output,&valid,&preferred)==-1);
     assert(!normal_calls && !alloc_calls);
-    struct NvKmsMode m=mode420(NV_YUV420_MODE_NONE);
-    if (normal_other) m.timings.hVisible=1920;
+    struct NvKmsMode m=normal_mode();
     NvKmsModeToKapi(&m,&expected);
     int rc=GetDisplayMode(&device,0x400,3,&output,&valid,&preferred);
+    if (!strcmp(scenario,"normalretry")) {
+        assert(rc==-1 && valid==99 && preferred==99 && !alloc_calls);
+        assert(!memcmp(&output, untouched, sizeof(output)));
+        normal_error=NV_FALSE;
+        rc=GetDisplayMode(&device,0x400,3,&output,&valid,&preferred);
+    }
     if (normal_error) {
         assert(rc==-1 && valid==99 && preferred==99 && !alloc_calls);
+        assert(!memcmp(&output, untouched, sizeof(output)));
+        assert(!diag_calls[0] && !diag_calls[1] && !log_length);
+        assert(GetDisplayMode(&device,0x400,3,NULL,NULL,NULL)==-1);
+        assert(!alloc_calls && !diag_calls[0] && !diag_calls[1]);
     } else {
         assert(rc==(normal_end?0:1));
         assert(valid==NV_FALSE && preferred==NV_TRUE);
         assert(!memcmp(&output,&expected,sizeof(output)));
-        if (!opt_in || normal_end || normal_other) {
+        if (!opt_in || normal_end || !strcmp(scenario,"unselected") ||
+            (!FOLLOWUP_ACTIVE && normal_other)) {
             assert(!alloc_calls && !diag_calls[0] && !diag_calls[1] && !log_length);
         } else if (fail_allocation) {
             assert(alloc_calls==2 && !diag_calls[0] && !diag_calls[1]);
             expect("ABORT allocation failed");
-        } else if (!strcmp(scenario,"bound")) {
+        } else if (!strcmp(scenario,"bound") || !strcmp(scenario,"bound30")) {
             assert(diag_calls[0]==512 && diag_calls[1]==512);
             expect("pass=A INCOMPLETE queried=512"); expect("pass=B INCOMPLETE queried=512");
+            assert(!strstr(logs," COMPLETE"));
+            if (!strcmp(scenario,"bound30")) {
+                expect("pass=A INCOMPLETE queried=512 matches=0 matches30=512 logged30=8");
+                expect("pass=B INCOMPLETE queried=512 matches=0 matches30=512 logged30=8");
+                assert(occurrences("overview=4K30") == 16);
+                assert(occurrences("pass=A index=") == 8 && occurrences("pass=B index=") == 8);
+                assert(!strstr(logs,"index=8 overview=4K30"));
+            }
+        } else if (!strcmp(scenario,"only30")) {
+            assert(diag_calls[0]==3 && diag_calls[1]==3);
+            expect("pass=A COMPLETE queried=3 matches=0 matches30=2 logged30=2");
+            expect("pass=B COMPLETE queried=3 matches=0 matches30=2 logged30=2");
+            expect("overview=4K30 source=1 valid=1 pclkHz=297000000 rrMilliHz=30000 yuv420=NONE");
+            assert(occurrences("overview=4K30") == 4);
+            assert(!strstr(logs,"pclkHz=594000000") && !strstr(logs,"roundtrip="));
+        } else if (!strcmp(scenario,"diagempty")) {
+            assert(diag_calls[0]==1 && diag_calls[1]==1);
+            expect("pass=A COMPLETE queried=1 matches=0 matches30=0 logged30=0");
+            expect("pass=B COMPLETE queried=1 matches=0 matches30=0 logged30=0");
+            assert(!strstr(logs,"overview=4K30"));
+        } else if (!strcmp(scenario,"ioerrorfirst")) {
+            assert(diag_calls[0]==1 && diag_calls[1]==1);
+            expect("pass=A ABORT ioctl index=0"); expect("pass=B ABORT ioctl index=0");
+            expect("pass=A INCOMPLETE queried=1"); expect("pass=B INCOMPLETE queried=1");
             assert(!strstr(logs," COMPLETE"));
         } else if (!strcmp(scenario,"ioerror")) {
             assert(diag_calls[0]==2 && diag_calls[1]==5);
@@ -279,6 +360,11 @@ int main(int argc, char **argv) {
             } else {
                 expect("Mode is rejected: TMDS limit."); expect("info: second line");
                 assert(!strstr(logs,"ABORT"));
+            }
+            if (!strcmp(scenario,"mixed")) {
+                expect("pass=A COMPLETE queried=3 matches=1 matches30=1 logged30=1");
+                expect("pass=B COMPLETE queried=5 matches=1 matches30=1 logged30=1");
+                assert(occurrences("overview=4K30") == 2);
             }
         }
         int count=diag_calls[0]+diag_calls[1], alloc=alloc_calls;
@@ -298,7 +384,10 @@ def main():
                         help='Unmodified NVIDIA open-gpu-kernel-modules 615.78.08 root')
     inputs.add_argument('--prepared-build', type=Path,
                         help='Prepared paired experiment; test its actual staged sources read-only')
+    parser.add_argument('--historical', action='store_true',
+                        help='Test the preserved original patch and its original twelve scenarios only')
     args = parser.parse_args()
+    patches = (PATCH,) if args.historical else (PATCH, FOLLOWUP)
     hook_path = ROOT / 'kexts/NVRM/os-nvkms-xnu.cpp'
     if args.prepared_build:
         prepared = args.prepared_build.resolve(strict=True)
@@ -334,12 +423,15 @@ def main():
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(content)
         if not args.prepared_build:
-            subprocess.run(['patch', '--batch', '--fuzz=0', '-p1', '-i', str(PATCH)], cwd=work, check=True,
-                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+            for patch in patches:
+                subprocess.run(['patch', '--batch', '--fuzz=0', '-p1', '-i', str(patch)], cwd=work, check=True,
+                               stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
         patched = (work / paths[0]).read_text()
         functions = cut(patched, 'static void NvKmsModeToKapi', 'static NvBool ValidateDisplayMode')
         assert 'Yuv420DiagEnumerate' in functions
-        harness = PREAMBLE + internal_structs + kapi_structs + DOUBLES + hook + functions + CHECKS
+        assert ('Y420_DIAG_4K30_LOG_LIMIT' in functions) is not args.historical, 'Wrong diagnostic revision for test mode'
+        preamble = PREAMBLE.replace('@FOLLOWUP_ACTIVE@', '0' if args.historical else '1')
+        harness = preamble + internal_structs + kapi_structs + DOUBLES + hook + functions + CHECKS
         source = work / 'diagnostic.c'
         source.write_text(harness)
         exe = work / 'diagnostic'
@@ -348,8 +440,12 @@ def main():
                         '-pthread', str(source), '-o', str(exe)], check=True)
         # Only the VALIDATE_MODE_INDEX ioctl is provided: adding a mode-setting
         # call to the extracted diagnostic fails compilation or the ioctl guard.
-        for scenario in ('off', 'on', 'sw', 'other', 'end', 'normalerror', 'ioerror',
-                         'bound', 'oom1', 'oom2', 'longinfo', 'claim'):
+        scenarios = ('off', 'on', 'sw', 'other', 'end', 'normalerror', 'ioerror',
+                     'bound', 'oom1', 'oom2', 'longinfo', 'claim')
+        if not args.historical:
+            scenarios += ('only30', 'mixed', 'diagempty', 'bound30', 'unselected',
+                          'off30', 'ioerrorfirst', 'normalretry')
+        for scenario in scenarios:
             subprocess.run([str(exe), scenario], check=True)
         # Compile both complete patched translation units with the real vendor
         # headers. The extracted harness intentionally does not replace this
@@ -375,12 +471,14 @@ def main():
             subprocess.run([compiler] + syntax_flags + vendor_flags + [str(work / path)],
                            cwd=modeset, check=True)
             print(f'PASS: full vendor syntax and format check: {path}', flush=True)
-        subprocess.run(['patch', '--batch', '--fuzz=0', '--reverse', '-p1', '-i', str(PATCH)],
-                       cwd=work, check=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        for patch in reversed(patches):
+            subprocess.run(['patch', '--batch', '--fuzz=0', '--reverse', '-p1', '-i', str(patch)],
+                           cwd=work, check=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
         if args.prepared_build:
             # Restore only the temporary test copy, never the supplied build.
-            subprocess.run(['patch', '--batch', '--fuzz=0', '-p1', '-i', str(PATCH)],
-                           cwd=work, check=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+            for patch in patches:
+                subprocess.run(['patch', '--batch', '--fuzz=0', '-p1', '-i', str(patch)],
+                               cwd=work, check=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
         for p, content in originals.items():
             assert (work / p).read_bytes() == content, f'Patch reverse changed {p}'
             assert (modeset / p).read_bytes() == content, f'Original vendor tree changed: {p}'

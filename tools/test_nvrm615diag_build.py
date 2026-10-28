@@ -15,6 +15,7 @@ import importlib.util
 import io
 import json
 from pathlib import Path
+import re
 import shlex
 import shutil
 import subprocess
@@ -34,6 +35,13 @@ VENDOR = None
 TIMER = 'src/nvidia/src/kernel/gpu/timer/timer_ostimer.c'
 FSP = 'src/nvidia/src/kernel/gpu/fsp/kern_fsp.c'
 PATCH_SHA = 'ed9fd700dd6a83b01d552b9148a2dc983e28eb17a8a2379c9b062c0ba13af0c0'
+PARENT_COMMIT = '61c581ed679ebec7be9685eecf0bad991671da82'
+KAPI = 'ogkm/src/nvidia-modeset/kapi/src/nvkms-kapi.c'
+
+
+def historical_proof():
+    return json.loads(subprocess.check_output(['git', 'show',
+        PARENT_COMMIT + ':build/nvrm615diag/proof.json'], cwd=REPO, text=True))
 
 
 def git(*args, cwd=REPO):
@@ -100,6 +108,7 @@ class DiagnosticGuardsTests(unittest.TestCase):
 
     def test_checked_in_diagnostic_and_hook_retain_the_original_provenance(self):
         proof = DIAG.load_proof()
+        self.assertEqual(proof['format'], 2)
         self.assertEqual(proof['experiment_base_commit'], DIAG.BASE_COMMIT)
         self.assertEqual(proof['diagnostic_source_commit'], DIAG.DIAG_COMMIT)
         self.assertEqual(proof['diagnostic_patch']['sha256'], PATCH_SHA)
@@ -109,8 +118,54 @@ class DiagnosticGuardsTests(unittest.TestCase):
         self.assertEqual(hashlib.sha256(original).hexdigest(), proof['xnu_hook']['source_sha256'])
         self.assertEqual(len(proof['expected_changed_objects']), 3)
         self.assertEqual(len(set(proof['expected_changed_objects'])), 3)
-        self.assertEqual(proof['patch_order'][-2:], [
-            'diagnostic:615-yuv420-diagnostic.patch', 'diagnostic:xnu-yuv420-hook.patch'])
+        self.assertEqual(proof['patch_order'][-3:], [
+            'diagnostic:615-yuv420-diagnostic.patch', 'diagnostic:xnu-yuv420-hook.patch',
+            'diagnostic:615-yuv420-trigger-overview.patch'])
+
+    def test_followup_retains_original_patch_history_and_three_object_allowlist(self):
+        current, original = DIAG.load_proof(), historical_proof()
+        for key in ('diagnostic_patch', 'diagnostic_source_commit', 'xnu_hook',
+                    'expected_changed_objects', 'allowed_extra_exports',
+                    'reference_recipe_sha256', 'baseline_patch_proof_sha256'):
+            self.assertEqual(current[key], original[key], key)
+        self.assertEqual(current['historical_source_changes'], original['source_changes'])
+        self.assertEqual(current['patch_order'][:-1], original['patch_order'])
+        followup = current['followup_patch']
+        self.assertEqual(followup['parent_commit'], PARENT_COMMIT)
+        self.assertEqual(followup['apply_directory'], 'src/nvidia-modeset')
+        self.assertEqual(set(followup['source_changes']), {KAPI})
+        transition = followup['source_changes'][KAPI]
+        self.assertEqual(transition['before_sha256'], original['source_changes'][KAPI]['after_sha256'])
+        self.assertEqual(transition['after_sha256'], current['source_changes'][KAPI]['after_sha256'])
+        self.assertNotEqual(transition['before_sha256'], transition['after_sha256'])
+        for relative, change in original['source_changes'].items():
+            self.assertEqual(current['source_changes'][relative]['before_sha256'], change['before_sha256'])
+            if relative != KAPI:
+                self.assertEqual(current['source_changes'][relative], change)
+        self.assertEqual(BASE.sha(DIAG.HERE / followup['path']), followup['sha256'])
+
+    def test_followup_patch_and_declared_transition_tampering_are_rejected(self):
+        for mutation in ('patch-bytes', 'before-hash', 'after-hash', 'parent'):
+            with self.subTest(mutation=mutation), tempfile.TemporaryDirectory(
+                    prefix='nvrm615diag-followup-proof-') as temporary:
+                recipe = Path(temporary) / 'recipe'
+                shutil.copytree(DIAG.HERE, recipe,
+                    ignore=shutil.ignore_patterns('__pycache__', '*.pyc'))
+                proof_path = recipe / 'proof.json'
+                proof = json.loads(proof_path.read_text())
+                followup = proof['followup_patch']
+                if mutation == 'patch-bytes':
+                    patch = recipe / followup['path']
+                    patch.write_bytes(patch.read_bytes() + b'\n')
+                elif mutation == 'before-hash':
+                    followup['source_changes'][KAPI]['before_sha256'] = '0' * 64
+                elif mutation == 'after-hash':
+                    followup['source_changes'][KAPI]['after_sha256'] = '0' * 64
+                else:
+                    followup['parent_commit'] = '0' * 40
+                BASE.save(proof_path, proof)
+                with mock.patch.object(DIAG, 'HERE', recipe), self.assertRaises(RuntimeError):
+                    DIAG.load_proof()
 
 
 @unittest.skipUnless(VENDOR, 'Use --vendor for real pinned-source integration checks')
@@ -203,6 +258,73 @@ class PreparedDiagnosticTests(unittest.TestCase):
             self.assertEqual(BASE.sha(self.output / relative), change['after_sha256'])
         self.assertEqual(BASE.sha(self.output / 'nullmoth/kexts/NVRM/os-nvkms-xnu.cpp'),
                          self.proof['xnu_hook']['source_sha256'])
+
+    def test_trigger_uses_only_successful_non_end_result_and_the_existing_claim(self):
+        source = (self.output / KAPI).read_text()
+        trigger = re.search(r'if \((!paramsValidate\.reply\.end.*?)\)\s*\{\s*'
+                            r'Yuv420DiagEnumerate\(device, display\);', source, re.S)
+        self.assertIsNotNone(trigger)
+        condition = ' '.join(trigger.group(1).split())
+        self.assertEqual(condition,
+                         '!paramsValidate.reply.end && nvkms_yuv420_diag_claim(display)')
+        self.assertIn('#define Y420_DIAG_4K30_LOG_LIMIT 8', source)
+        self.assertIn('overview=4K30', source)
+        self.assertIn('matches30=%u logged30=%u', source)
+
+    def test_followup_is_a_separate_strict_single_file_transition(self):
+        followup = self.proof['followup_patch']
+        relative = KAPI[len('ogkm/'):]
+        expected = followup['source_changes'][KAPI]
+        patch = self.diag_recipe / followup['path']
+        with tempfile.TemporaryDirectory(prefix='nvrm615diag-followup-once-') as temporary:
+            root = Path(temporary)
+            target = root / relative
+            target.parent.mkdir(parents=True)
+            target.write_bytes((self.output / KAPI).read_bytes())
+            reverse = ['git', 'apply', '--reverse', '--directory=src/nvidia-modeset']
+            subprocess.run([*reverse, '--check', str(patch)], cwd=root, check=True)
+            subprocess.run([*reverse, str(patch)], cwd=root, check=True)
+            self.assertEqual(BASE.sha(target), expected['before_sha256'])
+            DIAG.strict_patch(root, patch, (relative,), 'src/nvidia-modeset')
+            self.assertEqual(BASE.sha(target), expected['after_sha256'])
+            before_second = target.read_bytes()
+            with self.assertRaises(subprocess.CalledProcessError):
+                subprocess.run(['git', 'apply', '--check', '--directory=src/nvidia-modeset',
+                                str(patch)], cwd=root, check=True,
+                               stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            self.assertEqual(target.read_bytes(), before_second)
+
+    def test_followup_helper_checks_preimage_postimage_and_double_application(self):
+        followup = self.proof['followup_patch']
+        patch = self.diag_recipe / followup['path']
+        for mutation in ('none', 'preimage', 'postimage'):
+            with self.subTest(mutation=mutation), tempfile.TemporaryDirectory(
+                    prefix='nvrm615diag-followup-hashes-') as temporary:
+                root = Path(temporary)
+                target = root / KAPI
+                target.parent.mkdir(parents=True)
+                target.write_bytes((self.output / KAPI).read_bytes())
+                reverse = ['git', 'apply', '--reverse', '--directory=src/nvidia-modeset']
+                subprocess.run([*reverse, '--check', str(patch)], cwd=root / 'ogkm', check=True)
+                subprocess.run([*reverse, str(patch)], cwd=root / 'ogkm', check=True)
+                proof = copy.deepcopy(self.proof)
+                if mutation == 'preimage':
+                    target.write_bytes(target.read_bytes() + b'\n/* changed old diagnostic */\n')
+                    before = target.read_bytes()
+                    with self.assertRaises(RuntimeError):
+                        DIAG.apply_followup(root, proof)
+                    self.assertEqual(target.read_bytes(), before)
+                elif mutation == 'postimage':
+                    proof['followup_patch']['source_changes'][KAPI]['after_sha256'] = '0' * 64
+                    with self.assertRaises(RuntimeError):
+                        DIAG.apply_followup(root, proof)
+                else:
+                    DIAG.apply_followup(root, proof)
+                    self.assertEqual(BASE.sha(target), followup['source_changes'][KAPI]['after_sha256'])
+                    before_second = target.read_bytes()
+                    with self.assertRaises(RuntimeError):
+                        DIAG.apply_followup(root, proof)
+                    self.assertEqual(target.read_bytes(), before_second)
 
     def test_all_five_baseline_patches_timer_and_fsp_are_retained(self):
         proof = json.loads((BASE.HERE / 'patches/patch-proof.json').read_text())
@@ -318,7 +440,9 @@ class PreparedDiagnosticTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn('PASS claim:', result.stdout)
         for scenario in ('off', 'on', 'sw', 'other', 'end', 'normalerror', 'ioerror',
-                         'bound', 'oom1', 'oom2', 'longinfo'):
+                         'bound', 'oom1', 'oom2', 'longinfo', 'only30', 'mixed',
+                         'diagempty', 'bound30', 'unselected', 'off30',
+                         'ioerrorfirst', 'normalretry'):
             self.assertIn('PASS ' + scenario + ':', result.stdout)
         # Running the shared harness must not change source hashes or role.
         _, manifest = DIAG.load_inputs(str(self.output))
