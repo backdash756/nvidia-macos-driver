@@ -218,8 +218,9 @@ class PatchProvenanceTests(unittest.TestCase):
         self.assertEqual(proof['nvidia_commit'], RUNNER.NVIDIA)
         self.assertEqual(proof['nullmoth_source_commit'], RUNNER.NULLMOTH)
         self.assertEqual(proof['nvgfx_reference_commit'], RUNNER.NVGFX)
-        self.assertEqual(len(proof['patch_order']), 4)
-        self.assertEqual(len({item['normalized_path'] for item in proof['patch_order']}), 4)
+        self.assertEqual(proof['format'], 2)
+        self.assertEqual(len(proof['patch_order']), 5)
+        self.assertEqual(len({item['normalized_path'] for item in proof['patch_order']}), 5)
         for item in proof['patch_order']:
             original = subprocess.check_output(['git', 'show',
                 RUNNER.NULLMOTH + ':' + item['original_path']], cwd=REPO)
@@ -230,10 +231,31 @@ class PatchProvenanceTests(unittest.TestCase):
                 return [line for line in data.decode().splitlines()
                         if line.startswith(('+', '-')) and not line.startswith(('+++', '---'))
                         and line[1:].strip()]
-            self.assertEqual(changes(original), changes(normalized))
+            if item['normalized_path'] == '615-timer-callback-clear.patch':
+                self.assertEqual(item['apply_directory'], 'src/nvidia')
+                self.assertEqual(changes(normalized),
+                    ['+        pTmrEvent->super.pOSTmrCBdata = NULL;'])
+                self.assertIn(changes(normalized)[0], changes(original))
+                self.assertNotIn('kern_fsp.c', normalized.decode())
+            else:
+                self.assertEqual(item['apply_directory'], 'src/nvidia-modeset')
+                self.assertEqual(changes(original), changes(normalized))
         self.assertNotIn('nvrm_power', RUNNER.CXX_OBJECTS)
         self.assertNotIn('nvrm_physctl', RUNNER.LINK_OBJECTS)
         self.assertIn('nv_xnu_power', RUNNER.CXX_OBJECTS)
+
+
+class PatchScopeTests(unittest.TestCase):
+    def test_only_explicit_rm_and_nvkms_relative_scopes_are_accepted(self):
+        for directory in ('src/nvidia', 'src/nvidia-modeset'):
+            self.assertEqual(RUNNER.patch_target({'apply_directory': directory,
+                'target_path': 'src/example.c'}), directory + '/src/example.c')
+        for directory, target in (('src/common', 'example.c'), ('/src/nvidia', 'example.c'),
+                                  ('src/nvidia', '/example.c'), ('src/nvidia', '../example.c'),
+                                  ('src/nvidia', 'src/../../example.c'),
+                                  ('src/nvidia', 'src/name with spaces.c')):
+            with self.subTest(directory=directory, target=target), self.assertRaises(RuntimeError):
+                RUNNER.patch_target({'apply_directory': directory, 'target_path': target})
 
 
 class BinaryParserTests(unittest.TestCase):
@@ -417,8 +439,9 @@ class PreparedInputTests(unittest.TestCase):
         cls.output = cls.root / 'prepared'
         cls.before_status = git('status', '--porcelain', '--untracked-files=normal', cwd=VENDOR)
         cls.before_head = git('rev-parse', 'HEAD', cwd=VENDOR)
-        cls.vendor_hashes = {rel: RUNNER.sha(VENDOR / 'src/nvidia-modeset' / rel)
-            for rel in ('kapi/src/nvkms-kapi.c', 'src/nvkms-rm.c', 'src/nvkms-modepool.c')}
+        cls.vendor_hashes = {rel: RUNNER.sha(VENDOR / rel)
+            for rel in git('ls-files', cwd=VENDOR).splitlines()}
+        cls.vendor_file_inventory = set(cls.vendor_hashes)
         with mock.patch.object(RUNNER, 'HERE', cls.recipe), redirect_stdout(io.StringIO()):
             RUNNER.prepare(SimpleNamespace(vendor=str(VENDOR), output=str(cls.output)))
         cls.manifest = json.loads((cls.output / 'inputs.json').read_text())
@@ -431,7 +454,7 @@ class PreparedInputTests(unittest.TestCase):
         if cls.before_status != git('status', '--porcelain', '--untracked-files=normal', cwd=VENDOR):
             raise AssertionError('Vendor worktree changed during the tests')
         for rel, expected in cls.vendor_hashes.items():
-            if RUNNER.sha(VENDOR / 'src/nvidia-modeset' / rel) != expected:
+            if RUNNER.sha(VENDOR / rel) != expected:
                 raise AssertionError('Vendor source changed: ' + rel)
 
     def test_complete_prepared_inputs_pass_hash_verification(self):
@@ -441,6 +464,8 @@ class PreparedInputTests(unittest.TestCase):
         self.assertEqual(manifest['nullmoth_commit'], RUNNER.NULLMOTH)
         self.assertEqual(manifest['nvidia_commit'], RUNNER.NVIDIA)
         self.assertIs(manifest['diagnostic_enabled'], False)
+        self.assertEqual(manifest['patch_proof_format'], 2)
+        self.assertEqual(manifest['preserved_sources_sha256'], self.proof['preserved_sources_sha256'])
         self.assertEqual(manifest['recipe_sha256']['macho.py'],
                          RUNNER.sha(self.recipe / 'macho.py'))
 
@@ -465,12 +490,105 @@ class PreparedInputTests(unittest.TestCase):
             self.assertEqual(RUNNER.sha(self.recipe / 'patches' / item['normalized_path']),
                              item['normalized_sha256'])
         for rel, expected in self.proof['patched_sources_sha256'].items():
-            self.assertEqual(RUNNER.sha(self.output / 'ogkm/src/nvidia-modeset' / rel), expected)
+            self.assertEqual(RUNNER.sha(self.output / 'ogkm' / rel), expected)
         for item in self.proof['patch_order']:
-            result = subprocess.run(['git', 'apply', '--check', '--directory=src/nvidia-modeset',
+            result = subprocess.run(['git', 'apply', '--check', '--directory=' + item['apply_directory'],
                 str(self.recipe / 'patches' / item['normalized_path'])],
                 cwd=self.output / 'ogkm', stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             self.assertNotEqual(result.returncode, 0, 'Duplicate patch unexpectedly accepted')
+
+    def test_exact_source_inventory_changes_are_limited_to_the_three_baseline_targets(self):
+        self.assertEqual(set(self.manifest['vendor_sha256']), self.vendor_file_inventory)
+        differences = {rel for rel, expected in self.vendor_hashes.items()
+                       if self.manifest['vendor_sha256'][rel] != expected}
+        self.assertEqual(differences, {
+            'src/nvidia-modeset/kapi/src/nvkms-kapi.c',
+            'src/nvidia-modeset/src/nvkms-rm.c',
+            'src/nvidia/src/kernel/gpu/timer/timer_ostimer.c',
+        })
+        self.assertEqual(self.proof['patched_sources_sha256'][
+            'src/nvidia-modeset/kapi/src/nvkms-kapi.c'],
+            'ff0f957733b1576ad5ddd6e6c60c33f899c71f0010e52b1c078f90011203ae81')
+        self.assertEqual(self.proof['patched_sources_sha256'][
+            'src/nvidia-modeset/src/nvkms-rm.c'],
+            '0118510d6ee1c72b8cef4be93338ad1ca0d681ef15df880a39a9157950bb01cc')
+
+    def test_timer_patch_adds_only_the_original_unconditional_callback_clear(self):
+        relative = 'src/nvidia/src/kernel/gpu/timer/timer_ostimer.c'
+        pristine = (VENDOR / relative).read_bytes()
+        staged = (self.output / 'ogkm' / relative).read_bytes()
+        call = b'        status = osDestroyNanoTimer(pGpu->pOsGpuInfo, pTmrEvent->super.pOSTmrCBdata);\n'
+        self.assertEqual(pristine.count(call), 1)
+        self.assertEqual(staged, pristine.replace(call,
+            call + b'        pTmrEvent->super.pOSTmrCBdata = NULL;\n'))
+        self.assertEqual(digest(pristine),
+            '9710b89d0725d433b993ba803983bde1262096e7f62b81d39d0bc8f816ff5bb3')
+        self.assertEqual(digest(staged),
+            'da908b3245f9be48f0787eb48fd4d70b721f6d48cd55e99bb99421bb370379f2')
+
+    def test_upstream_fsp_guard_and_clear_remain_byte_identical(self):
+        relative = 'src/nvidia/src/kernel/gpu/fsp/kern_fsp.c'
+        pristine = (VENDOR / relative).read_bytes()
+        self.assertEqual((self.output / 'ogkm' / relative).read_bytes(), pristine)
+        self.assertEqual(digest(pristine),
+            '84ba2a49c08aa490aad40fe737b42d135e3bf11969e76ca257a8e5f425c51e54')
+        self.assertEqual(self.proof['preserved_sources_sha256'][relative], digest(pristine))
+        cleanup = pristine.decode().split('kfspCleanupBootState_IMPL', 1)[1]
+        cleanup = cleanup.split('portMemFree', 1)[0]
+        self.assertIn('if (pKernelFsp->pPollEvent != NULL)', cleanup)
+        self.assertIn('tmrEventDestroy(pTmr, pKernelFsp->pPollEvent);', cleanup)
+        self.assertIn('pKernelFsp->pPollEvent = NULL;', cleanup)
+
+    def test_timer_patch_once_and_duplicate_application_rejected_by_hash_guard(self):
+        item = self.proof['patch_order'][-1]
+        relative = RUNNER.patch_target(item)
+        with tempfile.TemporaryDirectory(prefix='nvrm615-timer-once-') as temporary:
+            root = Path(temporary)
+            target = root / relative
+            target.parent.mkdir(parents=True)
+            target.write_bytes((VENDOR / relative).read_bytes())
+            with mock.patch.object(RUNNER, 'HERE', self.recipe):
+                RUNNER.apply_baseline_patch(root, item)
+                expected = target.read_bytes()
+                with self.assertRaisesRegex(RuntimeError, 'Input changed'):
+                    RUNNER.apply_baseline_patch(root, item)
+            self.assertEqual(target.read_bytes(), expected)
+            self.assertEqual(digest(expected), item['target_after_sha256'])
+
+    def test_timer_preimage_postimage_and_declared_scope_mismatches_are_rejected(self):
+        item = self.proof['patch_order'][-1]
+        relative = RUNNER.patch_target(item)
+        for mutation in ('preimage', 'postimage', 'declared-target'):
+            with self.subTest(mutation=mutation), tempfile.TemporaryDirectory(
+                    prefix='nvrm615-timer-tamper-') as temporary:
+                root = Path(temporary)
+                target = root / relative
+                target.parent.mkdir(parents=True)
+                pristine = (VENDOR / relative).read_bytes()
+                target.write_bytes(pristine)
+                changed = dict(item)
+                if mutation == 'preimage':
+                    target.write_bytes(pristine + b'\n/* changed input */\n')
+                elif mutation == 'postimage':
+                    changed['target_after_sha256'] = '0' * 64
+                else:
+                    changed['target_path'] = 'src/kernel/gpu/timer/other.c'
+                    (root / RUNNER.patch_target(changed)).write_bytes(pristine)
+                with mock.patch.object(RUNNER, 'HERE', self.recipe):
+                    with self.assertRaises(RuntimeError):
+                        RUNNER.apply_baseline_patch(root, changed)
+                if mutation == 'declared-target':
+                    self.assertEqual(target.read_bytes(), pristine)
+
+    def test_repeated_prepare_reproduces_source_hashes_patch_order_and_epoch(self):
+        output = self.root / 'reproduced'
+        with mock.patch.object(RUNNER, 'HERE', self.recipe), redirect_stdout(io.StringIO()):
+            RUNNER.prepare(SimpleNamespace(vendor=str(VENDOR), output=str(output)))
+        second = json.loads((output / 'inputs.json').read_text())
+        for key in ('nullmoth_commit', 'nvidia_commit', 'source_date_epoch',
+                    'patch_order', 'patch_proof_format', 'preserved_sources_sha256',
+                    'recipe_sha256', 'nullmoth_sha256', 'vendor_sha256', 'diagnostic_enabled'):
+            self.assertEqual(second[key], self.manifest[key], key)
 
     def test_existing_diagnostic_is_applicable_but_not_applied(self):
         patch = REPO / 'kexts/NVRM/patches/615-yuv420-diagnostic.patch'

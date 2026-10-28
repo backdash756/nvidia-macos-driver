@@ -2,7 +2,7 @@
 
 The public NvGfx Darwin harness closes the previously missing RM/NVKMS archive and final NVRM link recipe. A complete source-based reference build can now be attempted without obtaining unpublished prebuilt NVIDIA archives. This branch prepares that attempt; **the complete NVRM compilation/link, official 2.5.4 binary comparison and hardware validation remain untested here**. The local macOS capability-probe results reported below are separate from a complete NVRM build.
 
-The build is deliberately reference-only. It uses the pinned NullMoth 2.5.4 sources, the existing display-completion/validation-log/viewport/backlight patches, and NVIDIA 615.78.08. It does not include our YUV420 diagnostic or NvGfx's laptop power/physical-control modifications. The source `0.1` KMOD and plist versions remain unchanged. The output is a development artifact, not an official 2.5.4 package or an installation-ready replacement.
+The build is deliberately reference-only. It uses the pinned NullMoth 2.5.4 sources, the existing display-completion/validation-log/viewport/backlight patches, the missing timer callback safety assignment from the original 2.5.4 patch, and NVIDIA 615.78.08. It does not include our YUV420 diagnostic or NvGfx's laptop power/physical-control modifications. The source `0.1` KMOD and plist versions remain unchanged. The output is a development artifact, not an official 2.5.4 package or an installation-ready replacement.
 
 > **Reported reference-004 milestone:** The user has now completed the full macOS reference build: 1100 RM and 225 NVKMS x86_64 objects, XNU glue, final link and ad-hoc signing. The static report has no rejections, identical imports/exports/symbol inventories, and two different symbol-interval lengths in the KAPI field helpers. These are user-reported results; the binaries are not present in this Linux workspace. See [NVRM-MACHINE-CODE-AUDIT.md](NVRM-MACHINE-CODE-AUDIT.md) for the new read-only instruction audit, isolated compiler-flag control and remaining compatibility checks. Preserve `reference-004`; these standalone tools do not change its build recipe or artifacts.
 
@@ -56,10 +56,11 @@ Final object order: `nv_xnu_stubs`, `nvkms_shaders`, `nvrm_fbinfo`, `nvrm_gpuva`
 2. `615-setmode-reason.patch` (existing setmode-reason patch).
 3. `615-viewport-scaling.patch`.
 4. `615-backlight-register-log.patch` (separate `nvkms-rm.c` target).
+5. `615-timer-callback-clear.patch` (RM `src/nvidia/src/kernel/gpu/timer/timer_ostimer.c`, timer assignment only from the original `610-fsp-timer-double-destroy.patch`).
 
-The original third completion hunk needs GNU patch **fuzz 1** because its preceding function changed in 615. The normalized patches change only context/positions; their complete output files are byte-identical to NvGfx's original ordered sequence. `git apply --check` rejects a duplicate application. The runner verifies source pins, a clean vendor input, original patch provenance, normalized patch hashes and the exact final patched source hashes. Existing vendor or NullMoth working trees are never patched or overwritten.
+The original third completion hunk needs GNU patch **fuzz 1** because its preceding function changed in 615. The four normalized NVKMS patches change only context/positions; their complete NVKMS output files remain byte-identical to NvGfx's original ordered sequence. The fifth patch separately carries the missing NullMoth timer statement. `git apply --check` rejects a duplicate application. Patch proof format 2 declares each application directory (NVKMS or RM), requires one declared target per patch, and records exact before/after source hashes. The runner verifies source pins, a clean vendor input, original patch provenance, normalized patch hashes, every source transition, final patched hashes and the preserved FSP hash. The complete staged inventory changes in only two NVKMS files and the timer file; diagnostic and compiler flags remain unchanged. Existing vendor or NullMoth working trees are never patched or overwritten.
 
-NVIDIA 615 already includes the `getFlipPendingStatus` table member; completion initializes it and implements the notifier query/reset behavior. No new public KAPI field is added. The 610 FSP cleanup patch is not used. In 615, the FSP poll-event guard/NULL assignment is upstream, but the separate timer-handle-clearing hunk is not; the reference preserves NVIDIA's pinned RM rather than adding cleanup changes.
+NVIDIA 615 already includes the `getFlipPendingStatus` table member; completion initializes it and implements the notifier query/reset behavior. No new public KAPI field is added. The complete 610 FSP patch is not applied: its poll-event guard/NULL assignment is already upstream. Only the missing timer callback NULL assignment is carried in patch 5, immediately after `osDestroyNanoTimer` with the original unconditional semantics. The FSP file remains byte-identical to the pinned source. This closes a source omission identified after the user's `reference-004` code audit; it is not a change to the pinned NVIDIA or NullMoth commits.
 
 NvGfx's `nvrm_power.cpp`, `nvrm_physctl.c`, physical-control ABI and NVRM entry points, and GPS/NVPCF/TGP changes in `os-xnu.cpp`/`os-xnu2.cpp` are excluded. NullMoth's existing `nv_xnu_power.cpp` is retained. No fork files are automatically discovered or linked.
 
@@ -167,14 +168,14 @@ git -C "$HOME/nvrm-inputs/open-gpu-615" rev-parse HEAD
 
 The resolved commit must match the NVIDIA pin above. The pinned NullMoth source commit must also already exist in local Git history. The user's earlier shallow-clone issue has been resolved locally; the helpers perform no automatic fetch, unshallow operation or history rewrite.
 
-**After updating the build helpers, prepare a new reference output directory.** Preparations made with earlier helper versions intentionally fail the recipe-hash check. Do not edit old manifests or reuse partial builds; retain their logs and choose a fresh path such as `reference-004` for the example below. Existing `reference-002` and `reference-003` are evidence and must remain unchanged. The unchanged single-attempt build policy still applies.
+**After updating the build helpers, prepare a new reference output directory.** Preparations made with earlier helper versions intentionally fail the recipe-hash check. Do not edit old manifests or reuse partial builds; retain their logs and choose the new `reference-005` path for the example below. Existing `reference-002`, `reference-003` and the successful `reference-004` are evidence and must remain unchanged. The unchanged single-attempt build policy still applies.
 
 From this branch's repository root (the example requires a directory that does not yet exist):
 
 ```bash
 python3 build/nvrm615/build.py prepare \
   --vendor "$HOME/nvrm-inputs/open-gpu-615" \
-  --output "$HOME/nvrm-builds/reference-004"
+  --output "$HOME/nvrm-builds/reference-005"
 ```
 
 Preparation also works under Linux. It materializes independent Git archives, not shared clones or dirty working-tree files, and applies the baseline patches strictly. It records every staged input hash and the build-recipe hashes in `inputs.json`. It does not compile. To compile later, run preparation on the Mac rather than moving its path-bound output directory.
@@ -183,7 +184,7 @@ After providing a complete backed-up official 2.5.4 reference bundle outside the
 
 ```bash
 python3 build/nvrm615/build.py build \
-  --output "$HOME/nvrm-builds/reference-004" \
+  --output "$HOME/nvrm-builds/reference-005" \
   --reference "$HOME/nvrm-reference/2.5.4/NVRM.kext" \
   --jobs 4
 ```
@@ -192,13 +193,32 @@ Append `--sdk /absolute/path/to/MacOSX.sdk` if needed. The build performs its ow
 
 The corrected macOS preflight and the full build/compare command paths have not been executed here. Do not interpret Linux preparation success as a completed Darwin build.
 
+## Compare the new reference-005 without changing earlier artifacts
+
+The build already runs the structural comparison in its own `comparison/` directory. For an additional report in a new, separate directory:
+
+```bash
+mkdir -p "$HOME/nvrm-audits"
+python3 build/nvrm615/compare.py \
+  --reference "$HOME/nvrm-reference/2.5.4/NVRM.kext" \
+  --candidate "$HOME/nvrm-builds/reference-005/NVRM.kext" \
+  --output "$HOME/nvrm-audits/reference-005-static-001"
+
+python3 tools/nvrm_code_audit.py \
+  --reference "$HOME/nvrm-reference/2.5.4/NVRM.kext/Contents/MacOS/NVRM" \
+  --candidate "$HOME/nvrm-builds/reference-005/NVRM.kext/Contents/MacOS/NVRM" \
+  --output "$HOME/nvrm-audits/reference-005-code-001"
+```
+
+Both report paths must be unused. Review `_tmrEventDestroyOSTimer_OSTIMER` in the full instruction report: the source correction is verified under Linux, but final Apple code generation must still be checked on macOS. The KAPI frame-pointer/CET differences remain intentional baseline compiler output; the corrected [isolated compiler probe](NVRM-MACHINE-CODE-AUDIT.md#isolated-kapi-compiler-reproduction) can now replay the actual inherited `-fno-omit-frame-pointer` followed by effective `-fomit-frame-pointer` sequence from `reference-004`. Its variant changes only the latter option and CET branch protection, not the baseline recipe.
+
 ## Outputs, metadata and comparison
 
 | Path within the output directory | Purpose |
 |---|---|
 | `inputs.json` | Full source pins, baseline patch order, recipe and source hashes; diagnostics disabled |
 | `nullmoth/kexts/NVRM/` | Exact 2.5.4 source snapshot, including unchanged source `0.1` metadata |
-| `ogkm/` | Independent NVIDIA 615 source snapshot with the baseline display patches |
+| `ogkm/` | Independent NVIDIA 615 source snapshot with four baseline NVKMS patches and the one-line RM timer correction; FSP preserved |
 | `ogkm/src/nvidia/_out/Darwin_x86_64/libnvkernel.a` | RM Mach-O archive |
 | `ogkm/src/nvidia-modeset/_out/Darwin_x86_64/libnvkms.a` | Paired, already baseline-patched NVKMS Mach-O archive |
 | Each component's `compile_cmds.sh` and top-level `*-objects.json` | Recorded compile templates and object manifests |
@@ -224,9 +244,15 @@ python3 tools/test_nvrm615_macho.py
 python3 tools/test_nvrm615_archives.py
 python3 tools/test_nvrm615_manifest.py --vendor /absolute/path/to/open-gpu-615
 python3 tools/test_nvrm615_build.py --vendor /absolute/path/to/open-gpu-615
+python3 tools/test_nvrm615_timer.py --vendor /absolute/path/to/open-gpu-615
+python3 tools/test_nvrm_kapi_compiler_probe.py
 ```
 
-The original baseline Linux run passed 39 tests, including real Makefile dry runs covering 1100 RM and 225 NVKMS objects and native syntax/format checks of both complete baseline-patched C files. These Makefile checks use the Linux host compiler and do not qualify Apple Clang flags or Mach-O output. The command output is the authoritative test result. The current Linux validation passed 85 tests: 39 baseline, 14 Mach-O, 15 path/manifest/channel and 17 archive tests. The Mach-O regressions cover the real Apple header, accepted constant representations, negative file types, malformed headers, comparison decisions and the complete simulated preflight through symbol checking and JSON output. The corrected preflight has now been reported successful on the user's Mac. The current path/stream/archive fixes, NVKMS compilation, complete NVRM link/signing, official 2.5.4 comparison, boot and RTX 5080 display behavior remain untested on macOS here. An author-reported RTX 5070 laptop boot is not a substitute for these checks.
+The original baseline Linux run passed 39 tests, including real Makefile dry runs covering 1100 RM and 225 NVKMS objects and native syntax/format checks of both complete baseline-patched C files. These Makefile checks use the Linux host compiler and do not qualify Apple Clang flags or Mach-O output. The command output is the authoritative test result. The pre-timer Linux validation passed 85 tests: 39 baseline, 14 Mach-O, 15 path/manifest/channel and 17 archive tests. The Mach-O regressions cover the real Apple header, accepted constant representations, negative file types, malformed headers, comparison decisions and the complete simulated preflight through symbol checking and JSON output. The corrected preflight has now been reported successful on the user's Mac. The current path/stream/archive fixes, NVKMS compilation, complete NVRM link/signing, official 2.5.4 comparison, boot and RTX 5080 display behavior remain untested on macOS here. An author-reported RTX 5070 laptop boot is not a substitute for these checks.
+
+For the timer-corrected recipe, the current Linux run passed **172 unit/integration tests**: 46 build/provenance, 14 Mach-O, 15 manifest/path/channel, 17 archive, 16 audit-reader, 10 audit-engine, 31 real LLVM fixture comparisons, 15 isolated compiler-probe fixtures and 8 timer C-harness checks. The unchanged YUV420 harness also passed its 12 scenarios and full-source syntax/format and apply/reverse checks, entirely in temporary trees; no diagnostic was added to the reference.
+
+The timer tests compile the actual extracted pristine/patched function body against model RM types and a model OS destructor. They verify the callback clear, queue-flag behavior, NULL guards and prevention of a second destructor call, including a pristine negative control. They do not validate production structure layout, concurrent event lifetime, Apple code generation or a macOS boot. The KAPI fixture tests now cover the actual inherited no-omit→omit order, the rejected reverse order and additional frame-pointer/CET flags; fake-compiler success is not a native compiler reproduction. The corrected `reference-005` Darwin build, ad-hoc signature, structural/instruction comparisons and hardware behavior remain open.
 
 The new regression suites additionally test actual direct-argv execution through an `@` interpreter path, unsafe Make paths, the exact six-line Apple linker banner with both real pinned Makefiles, 1100/225 object inventories and all mismatch cases, subprocess failures, and synthetic archive format/architecture failures. Simulated Apple-linker and synthetic archive tests are not Darwin compilation results.
 

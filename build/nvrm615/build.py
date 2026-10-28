@@ -118,6 +118,34 @@ def recipe_hashes():
             if p.is_file() and '__pycache__' not in p.parts and p.suffix != '.pyc'}
 
 
+def patch_target(patch):
+    """Keep patch scopes explicit; never infer an RM scope from an NVKMS path."""
+    directory, target = patch['apply_directory'], patch['target_path']
+    if (directory not in ('src/nvidia-modeset', 'src/nvidia')
+            or not re.fullmatch(r'[A-Za-z0-9_./-]+', target)
+            or Path(target).is_absolute() or '..' in Path(target).parts):
+        fail('Invalid baseline patch scope')
+    return directory + '/' + target
+
+
+def apply_baseline_patch(ogkm, patch):
+    """Require one exact before/after transition; git apply never uses fuzz."""
+    relative = patch_target(patch)
+    path = HERE / 'patches' / patch['normalized_path']
+    if sha(path) != patch['normalized_sha256']:
+        fail('Normalized patch hash mismatch: ' + patch['normalized_path'])
+    verify_hashes(ogkm, {relative: patch['target_before_sha256']})
+    common = ['git', 'apply', '--directory=' + patch['apply_directory']]
+    changes = subprocess.check_output(common + ['--numstat', '-z', str(path)], cwd=ogkm)
+    rows = changes.split(b'\0')
+    if (len(rows) != 2 or rows[-1] != b'' or len(rows[0].split(b'\t')) != 3
+            or rows[0].split(b'\t')[2] != relative.encode('ascii')):
+        fail('Baseline patch must modify exactly its declared target: ' + relative)
+    subprocess.run(common + ['--check', str(path)], cwd=ogkm, check=True)
+    subprocess.run(common + [str(path)], cwd=ogkm, check=True)
+    verify_hashes(ogkm, {relative: patch['target_after_sha256']})
+
+
 def prepare(args):
     out = output_path(args.output, fresh=True)
     vendor = Path(args.vendor).expanduser().resolve()
@@ -130,9 +158,10 @@ def prepare(args):
     if capture(['git', '-C', REPO, 'rev-parse', NULLMOTH + '^{commit}']) != NULLMOTH:
         fail('Pinned NullMoth 2.5.4 source is unavailable in local Git history')
     proof = json.loads((HERE / 'patches/patch-proof.json').read_text())
-    if (proof['nullmoth_source_commit'], proof['nvidia_commit'], proof['nvgfx_reference_commit']) != (NULLMOTH, NVIDIA, NVGFX):
+    if (proof['format'], proof['nullmoth_source_commit'], proof['nvidia_commit'], proof['nvgfx_reference_commit']) != (2, NULLMOTH, NVIDIA, NVGFX):
         fail('Patch manifest source pins disagree with the runner')
     for patch in proof['patch_order']:
+        patch_target(patch)
         if sha(HERE / 'patches' / patch['normalized_path']) != patch['normalized_sha256']:
             fail('Normalized patch hash mismatch: ' + patch['normalized_path'])
         original = subprocess.check_output(['git', '-C', str(REPO), 'show',
@@ -142,14 +171,14 @@ def prepare(args):
     out.mkdir(parents=True)
     extract_commit(REPO, NULLMOTH, out / 'nullmoth', ('kexts/NVRM',))
     extract_commit(vendor, NVIDIA, out / 'ogkm')
+    verify_hashes(out / 'ogkm', proof['pristine_sources_sha256'])
+    verify_hashes(out / 'ogkm', proof['preserved_sources_sha256'])
     # No old helper is invoked: strict patches are applied exactly once, before
     # building the paired archive. Source input repositories remain untouched.
     for patch in proof['patch_order']:
-        path = HERE / 'patches' / patch['normalized_path']
-        common = ['git', 'apply', '--directory=src/nvidia-modeset']
-        subprocess.run(common + ['--check', str(path)], cwd=out / 'ogkm', check=True)
-        subprocess.run(common + [str(path)], cwd=out / 'ogkm', check=True)
-    verify_hashes(out / 'ogkm/src/nvidia-modeset', proof['patched_sources_sha256'])
+        apply_baseline_patch(out / 'ogkm', patch)
+    verify_hashes(out / 'ogkm', proof['patched_sources_sha256'])
+    verify_hashes(out / 'ogkm', proof['preserved_sources_sha256'])
     hook_source = out / 'nullmoth/kexts/NVRM/os-nvkms-xnu.cpp'
     if 'nvkms_yuv420_diag_claim' in hook_source.read_text():
         fail('Diagnostic hook must be absent from the reference snapshot')
@@ -159,6 +188,8 @@ def prepare(args):
         'output': str(out), 'nullmoth_commit': NULLMOTH, 'nvidia_commit': NVIDIA,
         'nvidia_tag': TAG, 'nvgfx_recipe_commit': NVGFX, 'source_date_epoch': epoch,
         'diagnostic_enabled': False, 'patch_order': proof['patch_order'],
+        'patch_proof_format': proof['format'],
+        'preserved_sources_sha256': proof['preserved_sources_sha256'],
         'recipe_sha256': recipe_hashes(),
         'nullmoth_sha256': tree_hashes(out / 'nullmoth'),
         'vendor_sha256': tree_hashes(out / 'ogkm'),

@@ -85,7 +85,7 @@ Apple's published dyld code explicitly treats classic `MH_KEXT_BUNDLE` relocatio
 
 ## Isolated KAPI compiler reproduction
 
-The user reports that recompiling only `nvrm_kapi_fields.c` with the following two controlled changes produced the same visible instructions as the official 2.5.4 helpers:
+The user reports that recompiling only `nvrm_kapi_fields.c` with the following two controlled changes produced the same visible instructions as the official 2.5.4 helpers. The recorded command contains an inherited `-fno-omit-frame-pointer` followed by `-fomit-frame-pointer`; the latter is effective. The probe accepts exactly that ordering or the earlier single `-fomit-frame-pointer` form. It rejects reversed/duplicated frame-pointer options, leaf-frame-pointer overrides and additional CET options. The inherited earlier option is retained unchanged in both test commands:
 
 | Recorded NVKMS-template option | Isolated variant |
 |---|---|
@@ -114,6 +114,12 @@ The probe creates `control.o`, `variant.o`, separate compile stdout/stderr files
 Each comparison has its own `audit.json` and `summary.txt`. A verified reproduction requires both control helpers to match the recorded object, both baseline helpers to differ from the official instructions, and both variant helpers to match the official instructions under the audit's supported rules. Uncertain comparisons do not establish reproduction. A changed compiler or input must be investigated rather than silently accepted.
 
 This reproduces a compiler cause; it does not change baseline options, link a new NVRM, sign anything or authorize deployment. The actual macOS reproduction with these new helpers remains to be run. Linux fake-compiler and simulated-audit regressions demonstrate control flow and isolation only.
+
+## Timer omission identified after reference-004
+
+The user subsequently reports an actual machine-code difference in `_tmrEventDestroyOSTimer_OSTIMER`: official 2.5.4 clears the stored callback after `osDestroyNanoTimer`, while `reference-004` does not. The pinned 615 source confirms that it lacks `pTmrEvent->super.pOSTmrCBdata = NULL;`. The original NullMoth `610-fsp-timer-double-destroy.patch` contains that correction as well as an FSP hunk already upstream in 615. The updated [reference build](NVRM-615-REFERENCE-BUILD.md) carries only the missing one-line timer statement, preserves FSP, and requires a fresh `reference-005`. It does not change any old build, baseline compiler flags or diagnostic patch.
+
+This new source evidence supersedes any assumption that the two helper-size differences were the only code differences. The complete corrected NVRM must still be built and compared on macOS. Source-level and fixture checks cannot establish its final machine instructions or runtime behavior.
 
 ## KAPI and component compatibility: evidence and remaining limits
 
@@ -149,7 +155,7 @@ Other artifact differences require separate interpretation:
 
 ## Regression tests and execution status
 
-The Linux validation passed **153 tests**: 85 existing build/preflight/archive regressions and 68 new audit/probe checks (16 Mach-O reader, 10 engine/output guards, 31 real LLVM fixture comparisons, 11 compiler-probe fixtures).
+The initial audit Linux validation passed **153 tests**: 85 existing build/preflight/archive regressions and 68 new audit/probe checks (16 Mach-O reader, 10 engine/output guards, 31 real LLVM fixture comparisons, 11 compiler-probe fixtures).
 
 ```bash
 python3 tools/test_nvrm_audit_macho.py
@@ -160,6 +166,8 @@ python3 tools/test_nvrm_audit_llvm.py \
   --llvm-objdump /absolute/path/to/llvm-objdump \
   --nm /absolute/path/to/llvm-nm
 ```
+
+The subsequent timer/KAPI update passed **172 tests** across these suites and the build regressions, including 15 compiler-probe fixtures and 8 new timer C-harness checks. The unchanged YUV420 diagnostic harness passed separately in temporary trees. See the [reference build validation](NVRM-615-REFERENCE-BUILD.md#validation-and-the-next-diagnostic-step) for the current breakdown and its limits.
 
 The LLVM tests use small cross-generated x86_64 Mach-O objects and actual LLVM disassembly. They detect changed registers, structure displacements, immediates, frame-pointer/CET instructions, relocation targets/weak bindings, aliases and references into apparent padding. The fixtures are never executed or loaded. Reader/engine tests use synthetic metadata, and compiler-probe control-flow tests use a fake compiler and simulated audit reports. None of these results establishes code equality of the actual NVRM binaries. The real macOS full audit and compiler reproduction remain open.
 

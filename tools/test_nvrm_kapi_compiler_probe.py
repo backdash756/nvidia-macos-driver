@@ -42,7 +42,8 @@ class ProbeFixture:
             'import pathlib, sys\n'
             'args = sys.argv[1:]\n'
             'obj = pathlib.Path(args[args.index("-o") + 1])\n'
-            'variant = "-fno-omit-frame-pointer" in args and "-fcf-protection=none" in args\n'
+            'frames = [arg for arg in args if arg in ("-fomit-frame-pointer", "-fno-omit-frame-pointer")]\n'
+            'variant = frames[-1] == "-fno-omit-frame-pointer" and "-fcf-protection=none" in args\n'
             'obj.write_bytes(b"VARIANT-FIXTURE" if variant else b"CONTROL-FIXTURE")\n'
             'pathlib.Path(args[args.index("-MF") + 1]).write_text("fixture dependency\\n")\n'
             'print("simulated compiler; not a Darwin build")\n'
@@ -125,6 +126,49 @@ class ProbePlanningTests(unittest.TestCase):
         self.assertEqual(control_obj.name, 'control.o')
         self.assertEqual(variant_obj.name, 'variant.o')
 
+    def test_recorded_no_omit_then_omit_order_changes_exactly_two_flags(self):
+        self.fixture.argv.insert(self.fixture.argv.index('-fomit-frame-pointer'), '-fno-omit-frame-pointer')
+        self.fixture.save()
+        template = PROBE.load_template(self.fixture.build)
+        control, _ = PROBE.planned_command(template, self.fixture.output)
+        variant, _ = PROBE.planned_command(template, self.fixture.output, True)
+        self.assertEqual([arg for arg in control if 'frame-pointer' in arg],
+                         ['-fno-omit-frame-pointer', '-fomit-frame-pointer'])
+        self.assertEqual([arg for arg in variant if 'frame-pointer' in arg],
+                         ['-fno-omit-frame-pointer', '-fno-omit-frame-pointer'])
+        flag_changes = [(old, new) for old, new in zip(control, variant)
+                        if old != new and old.startswith('-')]
+        self.assertEqual(flag_changes, list(PROBE.FLAG_REPLACEMENTS.items()))
+        allowed_indices = {control.index('-fomit-frame-pointer'), control.index('-fcf-protection=branch')}
+        allowed_indices.update(control.index(flag) + 1 for flag in PROBE.OUTPUT_FLAGS)
+        self.assertEqual({index for index, (old, new) in enumerate(zip(control, variant)) if old != new},
+                         allowed_indices)
+        self.assertEqual(template['argv'], self.fixture.argv)
+
+    def test_reversed_frame_pointer_order_is_not_the_observed_baseline(self):
+        self.fixture.argv.insert(self.fixture.argv.index('-fomit-frame-pointer') + 1, '-fno-omit-frame-pointer')
+        self.fixture.save()
+        with self.assertRaisesRegex(ValueError, 'ordered frame-pointer/CET baseline'):
+            PROBE.load_template(self.fixture.build)
+        self.assertFalse(self.fixture.output.exists())
+
+    def test_duplicate_and_additional_frame_pointer_or_cet_options_are_rejected(self):
+        original = list(self.fixture.argv)
+        self.fixture.argv.insert(self.fixture.argv.index('-fomit-frame-pointer'), '-fno-omit-frame-pointer')
+        recorded = list(self.fixture.argv)
+        for baseline in (original, recorded):
+            for option in ('-fomit-frame-pointer', '-fno-omit-frame-pointer',
+                           '-momit-leaf-frame-pointer', '-mno-omit-leaf-frame-pointer',
+                           '-fomit-frame-pointer=all', '-fcf-protection=branch',
+                           '-fcf-protection=none', '-fcf-protection=full', '-fno-cf-protection',
+                           '-mshstk', '-mno-shstk', '-mmanual-endbr', '-mno-manual-endbr'):
+                self.fixture.entry['argv'] = baseline + [option]
+                self.fixture.save()
+                with self.subTest(baseline=baseline, option=option), self.assertRaisesRegex(
+                        ValueError, 'ordered frame-pointer/CET baseline'):
+                    PROBE.load_template(self.fixture.build)
+        self.assertFalse(self.fixture.output.exists())
+
     def test_source_or_compiler_changes_stop_before_output_creation(self):
         for target in (self.fixture.source, self.fixture.compiler, self.fixture.sdk_header):
             original = target.read_bytes()
@@ -191,6 +235,22 @@ class ProbePlanningTests(unittest.TestCase):
             self.assertEqual(command['cwd'], str(self.fixture.cwd))
             for flag in PROBE.OUTPUT_FLAGS:
                 self.assertTrue(PROBE.is_inside(Path(command['argv'][command['argv'].index(flag) + 1]), self.fixture.output))
+
+    def test_completed_probe_with_real_recorded_frame_pointer_order(self):
+        self.fixture.argv.insert(self.fixture.argv.index('-fomit-frame-pointer'), '-fno-omit-frame-pointer')
+        self.fixture.save()
+        before = PROBE.snapshot_tree(self.fixture.build)
+        with mock.patch.object(PROBE, 'run_audit', side_effect=self.fixture.simulated_audit), redirect_stdout(io.StringIO()):
+            result = PROBE.perform_probe(self.fixture.args())
+        self.assertEqual(result, 0)
+        report = json.loads((self.fixture.output / 'probe.json').read_text())
+        self.assertEqual(report['status'], 'reproduced')
+        self.assertTrue(report['inputs_unchanged'])
+        self.assertEqual(before, PROBE.snapshot_tree(self.fixture.build))
+        self.assertEqual([arg for arg in report['control']['argv'] if 'frame-pointer' in arg],
+                         ['-fno-omit-frame-pointer', '-fomit-frame-pointer'])
+        self.assertEqual([arg for arg in report['variant']['argv'] if 'frame-pointer' in arg],
+                         ['-fno-omit-frame-pointer', '-fno-omit-frame-pointer'])
 
     def test_uncertain_machine_code_result_is_not_called_reproduced(self):
         def uncertain(*args, **kwargs):

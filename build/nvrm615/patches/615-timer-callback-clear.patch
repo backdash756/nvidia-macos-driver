@@ -1,0 +1,10 @@
+--- a/src/kernel/gpu/timer/timer_ostimer.c
++++ b/src/kernel/gpu/timer/timer_ostimer.c
+@@ -218,6 +218,7 @@
+     {
+         // Cancel the callback of OS timer
+         status = osDestroyNanoTimer(pGpu->pOsGpuInfo, pTmrEvent->super.pOSTmrCBdata);
++        pTmrEvent->super.pOSTmrCBdata = NULL;
+         pTmrEvent->super.flags &= ~TMR_FLAG_OS_TIMER_QUEUED;
+     }
+     else

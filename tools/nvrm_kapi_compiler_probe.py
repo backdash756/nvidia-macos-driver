@@ -20,6 +20,8 @@ NVIDIA = '1a82fbfda8f321b056eb3568850f9316c5e465c5'
 SYMBOLS = ('_nvrm_kapi_mem_handle', '_nvrm_kapi_dev_handles')
 FLAG_REPLACEMENTS = {'-fomit-frame-pointer': '-fno-omit-frame-pointer',
                      '-fcf-protection=branch': '-fcf-protection=none'}
+FRAME_POINTER_BASELINES = (('-fomit-frame-pointer',),
+                          ('-fno-omit-frame-pointer', '-fomit-frame-pointer'))
 OUTPUT_FLAGS = ('-o', '-MF', '-MT')
 
 
@@ -156,10 +158,17 @@ def load_template(build):
             raise ValueError('Unreviewed side-output/plugin option: ' + arg)
         if any(arg.startswith(flag) and arg != flag for flag in OUTPUT_FLAGS):
             raise ValueError('Only explicit separate output/dependency arguments are supported: ' + arg)
-    frames = [arg for arg in argv if arg in ('-fomit-frame-pointer', '-fno-omit-frame-pointer')]
-    cet = [arg for arg in argv if arg.startswith('-fcf-protection')]
-    if frames != ['-fomit-frame-pointer'] or cet != ['-fcf-protection=branch']:
-        raise ValueError('The recorded command does not have the two observed baseline flags')
+    # Clang uses the last frame-pointer option. The recorded NVKMS template
+    # can inherit no-omit before adding omit; keep both original arguments in
+    # the control and replace only the final omit in the isolated variant.
+    # Reject extra/leaf-frame-pointer or CET overrides rather than guessing
+    # their effect or silently broadening the two-flag experiment.
+    frames = tuple(arg for arg in argv if arg.startswith(('-f', '-m'))
+                   and 'frame-pointer' in arg)
+    cet = [arg for arg in argv if arg.startswith(('-fcf-protection', '-fno-cf-protection',
+        '-mshstk', '-mno-shstk', '-mmanual-endbr', '-mno-manual-endbr', '-mcet', '-mno-cet'))]
+    if frames not in FRAME_POINTER_BASELINES or cet != ['-fcf-protection=branch']:
+        raise ValueError('The recorded command does not have an observed ordered frame-pointer/CET baseline')
     sdk = Path(preflight['sdk']['path']).resolve(strict=True)
     if argv.count('-isysroot') != 1 or Path(argv[argv.index('-isysroot') + 1]).resolve() != sdk:
         raise ValueError('Recorded SDK selection differs from the successful preflight')
