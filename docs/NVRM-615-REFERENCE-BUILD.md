@@ -4,6 +4,8 @@ The public NvGfx Darwin harness closes the previously missing RM/NVKMS archive a
 
 The build is deliberately reference-only. It uses the pinned NullMoth 2.5.4 sources, the existing display-completion/validation-log/viewport/backlight patches, and NVIDIA 615.78.08. It does not include our YUV420 diagnostic or NvGfx's laptop power/physical-control modifications. The source `0.1` KMOD and plist versions remain unchanged. The output is a development artifact, not an official 2.5.4 package or an installation-ready replacement.
 
+> **Reported reference-004 milestone:** The user has now completed the full macOS reference build: 1100 RM and 225 NVKMS x86_64 objects, XNU glue, final link and ad-hoc signing. The static report has no rejections, identical imports/exports/symbol inventories, and two different symbol-interval lengths in the KAPI field helpers. These are user-reported results; the binaries are not present in this Linux workspace. See [NVRM-MACHINE-CODE-AUDIT.md](NVRM-MACHINE-CODE-AUDIT.md) for the new read-only instruction audit, isolated compiler-flag control and remaining compatibility checks. Preserve `reference-004`; these standalone tools do not change its build recipe or artifacts.
+
 ## Audited inputs and evidence
 
 | Input | Pinned revision |
