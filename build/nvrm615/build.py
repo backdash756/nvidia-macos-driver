@@ -337,14 +337,17 @@ class Recorder:
         return path.read_text()
 
 
-def build(args):
+def build(args, input_loader=None):
     if platform.system() != 'Darwin':
         fail('Compilation/linking require macOS; prepare and Linux tests are available here')
     if os.geteuid() == 0:
         fail('Run as an ordinary user; no administrator privileges are required')
     from archives import validate_archive
 
-    out, manifest = load_inputs(args.output)
+    # The separate experiment runner supplies its strict diagnostic loader.
+    # The reference CLI retains this default loader and rejects diagnostics.
+    out, manifest = (input_loader or load_inputs)(args.output)
+    diagnostic_enabled = manifest['diagnostic_enabled']
     if (out / 'build-state.json').exists():
         fail('This is a single-attempt build directory; prepare a fresh output for retries')
     if not 1 <= args.jobs <= 32:
@@ -361,6 +364,7 @@ def build(args):
     for folder in ('logs', 'tmp', 'glue'):
         (out / folder).mkdir()
     save(out / 'build-state.json', {'state': 'started', 'reference': str(reference),
+                                    'diagnostic_enabled': diagnostic_enabled,
                                     'reference_binary_sha256': sha(reference / 'Contents/MacOS/NVRM')})
     preflight = [sys.executable, str(HERE / 'preflight.py'), '--output', str(out / 'preflight')]
     if args.sdk:
@@ -462,13 +466,13 @@ def build(args):
         'files': {p.relative_to(out).as_posix(): sha(p) for p in sorted(out.rglob('*'))
                   if p.is_file() and (p.suffix in ('.o', '.a') or candidate in p.parents)},
         'reference_sha256': sha(reference / 'Contents/MacOS/NVRM'),
-        'diagnostic_enabled': False, 'metadata_version': '0.1',
+        'diagnostic_enabled': diagnostic_enabled, 'metadata_version': '0.1',
     })
     compare = [sys.executable, str(HERE / 'compare.py'), '--reference', str(reference),
                '--candidate', str(candidate), '--output', str(out / 'comparison')]
     result = subprocess.run(compare, env=env)
     save(out / 'build-state.json', {'state': 'built; static review and macOS hardware validation still required',
-                                    'comparison_returncode': result.returncode, 'diagnostic_enabled': False})
+                                    'comparison_returncode': result.returncode, 'diagnostic_enabled': diagnostic_enabled})
     if result.returncode:
         fail('Reference comparison rejected or failed; inspect comparison output; do not integrate diagnostics')
     print('Reference artifact built and compared. Review all differences; not installed or hardware-qualified.')

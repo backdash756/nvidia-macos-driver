@@ -6,6 +6,8 @@ The build is deliberately reference-only. It uses the pinned NullMoth 2.5.4 sour
 
 > **Reported reference-004 milestone:** The user has now completed the full macOS reference build: 1100 RM and 225 NVKMS x86_64 objects, XNU glue, final link and ad-hoc signing. The static report has no rejections, identical imports/exports/symbol inventories, and two different symbol-interval lengths in the KAPI field helpers. These are user-reported results; the binaries are not present in this Linux workspace. See [NVRM-MACHINE-CODE-AUDIT.md](NVRM-MACHINE-CODE-AUDIT.md) for the new read-only instruction audit, isolated compiler-flag control and remaining compatibility checks. Preserve `reference-004`; these standalone tools do not change its build recipe or artifacts.
 
+> **Separate diagnostic experiment:** The user reports a successful local `reference-005`. The new [NVRM-615-YUV420-EXPERIMENT.md](NVRM-615-YUV420-EXPERIMENT.md) documents the paired diagnostic build on `experiment/nvrm-615-yuv420-ab`. The ordinary reference CLI remains diagnostic-free; existing builds are never reused or modified. No diagnostic Darwin build or hardware validation has been performed in this Linux workspace.
+
 ## Audited inputs and evidence
 
 | Input | Pinned revision |

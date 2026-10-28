@@ -2,6 +2,8 @@
 
 # Diagnosing 4K/60 over DP to HDMI
 
+> **Current isolated build workflow:** See [NVRM-615-YUV420-EXPERIMENT.md](NVRM-615-YUV420-EXPERIMENT.md) for the paired NVIDIA 615 build based on the pinned NullMoth 2.5.4 sources and reported successful `reference-005`. That workflow builds and statically compares only; it does not authorize installation or a hardware test. The historical implementation and capture notes below are not deployment instructions for this build task.
+
 This diagnostic compares two separate NVKMS mode-validation passes. It is intended to establish whether a 3840×2160 mode at approximately 60 Hz fails with the existing parameters but passes with `preferYUV420=true`. It is not an output fix and does not demonstrate a successful display modeset.
 
 The branch is based on the existing fork revision `6e375469` (changelog 2.6.2). At that revision, the examined display sources, including `os-nvkms-xnu.cpp`, are unchanged from the local 2.5.4 revision `4677905`. No driver package has been built, and no binary version has been relabeled as 2.5.4.

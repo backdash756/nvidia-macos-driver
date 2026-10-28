@@ -2,6 +2,7 @@
 """Replay the opt-in Y420 diagnostic against controlled NVKMS responses.
 
 Usage: python3 tools/test_yuv420_diagnostic.py --vendor /path/to/open-gpu-kernel-modules
+   or: python3 tools/test_yuv420_diagnostic.py --prepared-build /path/to/new/diagnostic
 
 The supplied NVIDIA 615.78.08 tree is read-only. The patch is applied and
 reversed in a temporary directory. The C harness compiles the actual patched
@@ -10,6 +11,8 @@ allocation failures and boot arguments, rather than a display engine. This
 checks diagnostic behavior, not real EDID parsing, link training or a Mac boot.
 """
 import argparse
+import hashlib
+import json
 import os
 from pathlib import Path
 import shlex
@@ -290,10 +293,30 @@ int main(int argc, char **argv) {
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--vendor', required=True, type=Path,
+    inputs = parser.add_mutually_exclusive_group(required=True)
+    inputs.add_argument('--vendor', type=Path,
                         help='Unmodified NVIDIA open-gpu-kernel-modules 615.78.08 root')
+    inputs.add_argument('--prepared-build', type=Path,
+                        help='Prepared paired experiment; test its actual staged sources read-only')
     args = parser.parse_args()
-    vendor = args.vendor.resolve()
+    hook_path = ROOT / 'kexts/NVRM/os-nvkms-xnu.cpp'
+    if args.prepared_build:
+        prepared = args.prepared_build.resolve(strict=True)
+        manifest = json.loads((prepared / 'inputs.json').read_text())
+        assert (manifest['format'], manifest['build_kind'], manifest['diagnostic_enabled']) == (
+            2, 'yuv420-ab-experiment', True), 'Expected a paired experimental source manifest'
+        vendor = prepared / 'ogkm'
+        hook_path = prepared / 'nullmoth/kexts/NVRM/os-nvkms-xnu.cpp'
+        for folder, key, paths in (
+            ('ogkm', 'vendor_sha256', ('src/nvidia-modeset/kapi/src/nvkms-kapi.c',
+                                     'src/nvidia-modeset/src/nvkms-modepool.c')),
+            ('nullmoth', 'nullmoth_sha256', ('kexts/NVRM/os-nvkms-xnu.cpp',)),
+        ):
+            for relative in paths:
+                actual = hashlib.sha256((prepared / folder / relative).read_bytes()).hexdigest()
+                assert actual == manifest[key][relative], 'Changed prepared source: ' + relative
+    else:
+        vendor = args.vendor.resolve()
     modeset = vendor / 'src/nvidia-modeset'
     paths = ('kapi/src/nvkms-kapi.c', 'src/nvkms-modepool.c')
     originals = {p: (modeset / p).read_bytes() for p in paths}
@@ -301,7 +324,8 @@ def main():
     timing_header = (vendor / 'src/common/unix/common/inc/nv_mode_timings.h').read_text()
     kapi_structs = cut(header, 'struct NvKmsKapiDisplayModeTimings {', '#define NVKMS_KAPI_LAYER_MAX')
     internal_structs = cut(timing_header, 'enum NvYuv420Mode {', 'static inline NvBool NvModeTimingsMatch')
-    hook = cut((ROOT / 'kexts/NVRM/os-nvkms-xnu.cpp').read_text(),
+    original_hook = hook_path.read_bytes()
+    hook = cut(original_hook.decode(),
                'NvBool nvkms_yuv420_diag_claim(', 'static bool gKmsTraceRm')
     with tempfile.TemporaryDirectory(prefix='nullmoth-y420-test-') as tmp:
         work = Path(tmp)
@@ -309,8 +333,9 @@ def main():
             target = work / p
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(content)
-        subprocess.run(['patch', '--batch', '--fuzz=0', '-p1', '-i', str(PATCH)], cwd=work, check=True,
-                       stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        if not args.prepared_build:
+            subprocess.run(['patch', '--batch', '--fuzz=0', '-p1', '-i', str(PATCH)], cwd=work, check=True,
+                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
         patched = (work / paths[0]).read_text()
         functions = cut(patched, 'static void NvKmsModeToKapi', 'static NvBool ValidateDisplayMode')
         assert 'Yuv420DiagEnumerate' in functions
@@ -352,9 +377,14 @@ def main():
             print(f'PASS: full vendor syntax and format check: {path}', flush=True)
         subprocess.run(['patch', '--batch', '--fuzz=0', '--reverse', '-p1', '-i', str(PATCH)],
                        cwd=work, check=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        if args.prepared_build:
+            # Restore only the temporary test copy, never the supplied build.
+            subprocess.run(['patch', '--batch', '--fuzz=0', '-p1', '-i', str(PATCH)],
+                           cwd=work, check=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
         for p, content in originals.items():
             assert (work / p).read_bytes() == content, f'Patch reverse changed {p}'
             assert (modeset / p).read_bytes() == content, f'Original vendor tree changed: {p}'
+        assert hook_path.read_bytes() == original_hook, 'Supplied XNU hook changed'
     print('PASS: patch applies/reverses without fuzz; supplied NVIDIA files unchanged')
 
 
