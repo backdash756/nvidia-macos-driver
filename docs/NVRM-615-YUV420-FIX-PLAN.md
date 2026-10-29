@@ -1,6 +1,18 @@
 # RTX 5080 / NVIDIA 615 YUV420 production-fix investigation
 
-Status: **design/research only**. This branch does not contain a functional fix and must **not** be built, installed, or used to alter EFI. Parent: `experiment/nvrm-615-yuv420-ab`. Preserve the working diagnostic and official NullMoth 2.5.4 rollback.
+Status: **stage-1 source patch written; full fix and build integration NOT complete**. This branch must **not** be installed, or used to alter EFI. Discovery-only source changes are still insufficient for a productive modeset. Parent: `experiment/nvrm-615-yuv420-ab`. Preserve the working diagnostic and official NullMoth 2.5.4 rollback.
+
+## Implemented stage 1 (source-only, not deployable)
+
+Two new patches on this branch:
+
+- `build/nvrm615fix/patches/615-yuv420-fix-discovery.patch`: guarded `GetDisplayMode` retry for invalid 3840x2160 at 59.9–60.1 Hz. Strict same timings/clock check, hardware YUV420 mode required. Normal responses are unchanged when absent/disabled or when retry fails. It does **not** fix `ValidateDisplayMode` or `KmsSetMode`.
+- `build/nvrm615fix/patches/xnu-yuv420-fix-optin.patch`: single-display `nvyuv420fix` gate, distinct from `nvyuv420diag`, disabled by default.
+- `tools/test_yuv420_fix_stage1.py`: read-only `git apply --check` against existing `yuv420-diag-003` staged inputs, verifying KAPI source SHA and no mutations.
+
+Static strict hunk simulation verified both new patches against the pinned original NVIDIA KAPI source after the existing diagnostic and trigger-follow-up patches, and against the existing XNU hook. **This is not a compiler, static link, runtime or hardware test**. The installed NVRM remains `diag-003`. Do not enable `nvyuv420fix` yet. The original diagnostic build runner's pinned source hashes remain intentionally unchanged.
+
+Next: build a dedicated pinned fix runner with additional source-hash transitions and object allowlist; implement matched-mode YUV420 reconstruction for both `ValidateDisplayMode` and `KmsSetMode`, test preflight/commit semantics, and only then compile and compare an isolated new binary.
 
 ## Real hardware evidence — 2026-10-29
 
