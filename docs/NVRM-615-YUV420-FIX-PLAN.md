@@ -1,18 +1,20 @@
 # RTX 5080 / NVIDIA 615 YUV420 production-fix investigation
 
-Status: **stage-1 source patch written; full fix and build integration NOT complete**. This branch must **not** be installed, or used to alter EFI. Discovery-only source changes are still insufficient for a productive modeset. Parent: `experiment/nvrm-615-yuv420-ab`. Preserve the working diagnostic and official NullMoth 2.5.4 rollback.
+Status: **stage-1 + stage-2 source patches written; compile, fixed-hash build integration and hardware verification NOT complete**. This branch must **not** be installed, or used to alter EFI. The proposed stage-2 reconstruction has not been compiled or proved safe at runtime. Parent: `experiment/nvrm-615-yuv420-ab`. Preserve the working diagnostic and official NullMoth 2.5.4 rollback.
 
-## Implemented stage 1 (source-only, not deployable)
+## Implemented source stages 1 and 2 (not deployable)
 
 Two new patches on this branch:
 
-- `build/nvrm615fix/patches/615-yuv420-fix-discovery.patch`: guarded `GetDisplayMode` retry for invalid 3840x2160 at 59.9–60.1 Hz. Strict same timings/clock check, hardware YUV420 mode required. Normal responses are unchanged when absent/disabled or when retry fails. It does **not** fix `ValidateDisplayMode` or `KmsSetMode`.
+- `build/nvrm615fix/patches/615-yuv420-fix-discovery.patch`: guarded `GetDisplayMode` retry for invalid 3840x2160 at 59.9–60.1 Hz. Strict same timings/clock check, hardware YUV420 mode required. Normal responses are unchanged when absent/disabled or when retry fails. Stage 2 separately proposes to handle `ValidateDisplayMode` and `KmsSetMode`.
 - `build/nvrm615fix/patches/xnu-yuv420-fix-optin.patch`: single-display `nvyuv420fix` gate, distinct from `nvyuv420diag`, disabled by default.
+- `build/nvrm615fix/patches/615-yuv420-fix-validate-setmode.patch`: added a bounded 128-index EDID validation lookup to recover **only** a matching, HW-YUV420-valid 4K60 timing for `ValidateDisplayMode` and single-display `NvKmsKapiRequestedModeSetConfigToKms` requests. No public KAPI ABI changes. This is a proposed code path, not yet compiled, linked, or tested in hardware.
+- `tools/test_yuv420_fix_stage2.py`: replays stage-1 + stage-2 and XNU opt-in patches only in a disposable temporary source copy; verifies pinned original stage-003 hashes before/after and reports candidate source SHA-256 for a future isolated build manifest.
 - `tools/test_yuv420_fix_stage1.py`: read-only `git apply --check` against existing `yuv420-diag-003` staged inputs, verifying KAPI source SHA and no mutations.
 
-Static strict hunk simulation verified both new patches against the pinned original NVIDIA KAPI source after the existing diagnostic and trigger-follow-up patches, and against the existing XNU hook. **This is not a compiler, static link, runtime or hardware test**. The installed NVRM remains `diag-003`. Do not enable `nvyuv420fix` yet. The original diagnostic build runner's pinned source hashes remain intentionally unchanged.
+Static strict hunk simulation verified the initial discovery patches and the subsequent stage-2 KAPI source patch against the pinned original NVIDIA KAPI source after the existing diagnostic and trigger-follow-up patches, and against the existing XNU hook. **This is not a compiler, static link, runtime or hardware test**. The installed NVRM remains `diag-003`. Do not enable `nvyuv420fix` yet. The original diagnostic build runner's pinned source hashes remain intentionally unchanged.
 
-Next: build a dedicated pinned fix runner with additional source-hash transitions and object allowlist; implement matched-mode YUV420 reconstruction for both `ValidateDisplayMode` and `KmsSetMode`, test preflight/commit semantics, and only then compile and compare an isolated new binary.
+Next: verify stage 2 on the actual macOS diagnostic build tree, then build a dedicated pinned fix runner with additional source-hash transitions and object allowlist; test source and preflight/commit semantics, compile, link, review and compare an isolated binary. No install before review.
 
 ## Real hardware evidence — 2026-10-29
 
