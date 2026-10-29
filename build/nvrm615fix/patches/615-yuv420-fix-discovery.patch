@@ -1,10 +1,8 @@
 --- a/kapi/src/nvkms-kapi.c
 +++ b/kapi/src/nvkms-kapi.c
-@@ -2527,10 +2527,13 @@
-      * if possible.
-      */
-     params->overrides = NVKMS_MODE_VALIDATION_NO_RRX1K_CHECK;
- }
+@@ -2532,6 +2532,9 @@
+ extern NvBool nvkms_yuv420_diag_claim(NvU32 display);
+ static void Yuv420DiagEnumerate(struct NvKmsKapiDevice *, NvKmsKapiDisplay);
  
 +/* Opt-in production-fix experiment; distinct from once-per-boot A/B probe. */
 +extern NvBool nvkms_yuv420_fix_enabled(NvU32 display);
@@ -12,9 +10,7 @@
  static int GetDisplayMode
  (
      struct NvKmsKapiDevice *device,
-     NvKmsKapiDisplay display, NvU32 modeIndex,
-     struct NvKmsKapiDisplayMode *mode, NvBool *valid,
-@@ -2565,8 +2565,60 @@
+@@ -2568,8 +2571,60 @@
              modeIndex, display);
          return -1;
      }
