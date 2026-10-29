@@ -1,0 +1,25 @@
+--- a/kexts/NVRM/Info.plist
++++ b/kexts/NVRM/Info.plist
+@@ -15,9 +15,9 @@
+ 	<key>CFBundlePackageType</key>
+ 	<string>KEXT</string>
+ 	<key>CFBundleShortVersionString</key>
+-	<string>0.1</string>
++	<string>2.5.4</string>
+ 	<key>CFBundleVersion</key>
+-	<string>0.1</string>
++	<string>2.5.4</string>
+ 	<key>CFBundleSignature</key>
+ 	<string>????</string>
+ 	<key>OSBundleLibraries</key>
+--- a/kexts/NVRM/NVRM.cpp
++++ b/kexts/NVRM/NVRM.cpp
+@@ -42,7 +42,7 @@
+                                        NvU32 *pClsCopy, NvU32 *pClsEnc, NvU32 *pClsDec, NvU32 *pStatus);
+ kern_return_t _start(kmod_info_t *ki, void *data);
+ kern_return_t _stop(kmod_info_t *ki, void *data);
+-KMOD_EXPLICIT_DECL(com.nullmoth.NVRM, "0.1", _start, _stop)
++KMOD_EXPLICIT_DECL(com.nullmoth.NVRM, "2.5.4", _start, _stop)
+ __private_extern__ kmod_start_func_t *_realmain = NULL;
+ __private_extern__ kmod_stop_func_t  *_antimain = NULL;
+ __private_extern__ int _kext_apple_cc = __APPLE_CC__;

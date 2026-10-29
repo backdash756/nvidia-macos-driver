@@ -208,7 +208,7 @@ def archive_inventory(root, component, artifact_hashes):
     return {'objects': objects, 'report': report, 'members': members}
 
 
-def inspect_pair(baseline, candidate, proof):
+def inspect_pair(baseline, candidate, proof, candidate_policy=None):
     """Validate actual recorded files; fixtures can exercise this core on Linux."""
     baseline, candidate = Path(baseline).resolve(), Path(candidate).resolve()
     if baseline == candidate or baseline in candidate.parents or candidate in baseline.parents:
@@ -222,9 +222,15 @@ def inspect_pair(baseline, candidate, proof):
         manifests = [read_json(safe_file(root, 'inputs.json')) for root in (baseline, candidate)]
         before = read_json(safe_file(candidate, 'baseline-inputs.json'))
         manifest_role(manifests[0], baseline, False)
-        manifest_role(manifests[1], candidate, True)
+        if candidate_policy is None:
+            manifest_role(manifests[1], candidate, True)
+        else:
+            # Separate experiment entry points opt in explicitly. The ordinary
+            # diagnostic CLI retains its original role and object scope.
+            candidate_policy.validate_manifest(manifests[1], candidate, proof)
         manifest_role(before, candidate, False)
-        if manifests[1].get('diagnostic_proof') != proof:
+        proof_key = 'diagnostic_proof' if candidate_policy is None else candidate_policy.proof_key
+        if manifests[1].get(proof_key) != proof:
             raise ValueError('Candidate diagnostic provenance differs from the selected proof')
         if manifests[1].get('baseline_manifest_sha256') != sha(candidate / 'baseline-inputs.json'):
             raise ValueError('Preserved baseline manifest hash differs')
@@ -258,6 +264,9 @@ def inspect_pair(baseline, candidate, proof):
         report['evidence_metadata_sha256'] = {label: {name: sha(safe_file(root, name))
             for name in metadata_files + (['baseline-inputs.json'] if label == 'candidate' else [])}
             for label, root in (('baseline', baseline), ('candidate', candidate))}
+        if candidate_policy is not None:
+            report['evidence_metadata_sha256']['candidate'].update({
+                name: sha(safe_file(candidate, name)) for name in candidate_policy.evidence_files})
         chains = [toolchain_signature(read_json(safe_file(root, 'preflight/preflight.json')))
                   for root in (baseline, candidate)]
         report['toolchains'] = chains
@@ -283,12 +292,15 @@ def inspect_pair(baseline, candidate, proof):
                                    'identical': sum(old_objects.get(name) == value for name, value in new_objects.items()),
                                    'changed': len(object_changes)}
         if object_changes != expected_objects:
-            reject('Object changes are not exactly the three paired diagnostic objects')
+            scope = 'three paired diagnostic objects' if candidate_policy is None else candidate_policy.object_scope
+            reject('Object changes are not exactly the ' + scope)
         if set(artifacts[0]) != set(artifacts[1]):
             reject('Object/archive/bundle artifact inventory differs')
         allowed_nonobjects = {'NVRM.kext/Contents/MacOS/NVRM', 'NVRM.kext/Contents/_CodeSignature/CodeResources'}
         allowed_nonobjects.update('ogkm/src/' + component + '/_out/Darwin_x86_64/' + archive
                                  for component, archive in COMPONENTS.items())
+        if candidate_policy is not None:
+            allowed_nonobjects.update(candidate_policy.allowed_nonobjects)
         unexpected = [name for name in set(artifacts[0]) & set(artifacts[1])
                       if not name.endswith('.o') and artifacts[0][name] != artifacts[1][name]
                       and name not in allowed_nonobjects]
@@ -306,6 +318,8 @@ def inspect_pair(baseline, candidate, proof):
                 'baseline': inventories[0]['report'], 'candidate': inventories[1]['report']}
             if changed != allowed:
                 reject('Archive member changes exceed/miss the diagnostic scope: ' + component)
+        if candidate_policy is not None:
+            report['candidate_policy_evidence'] = candidate_policy.inspect_artifacts(baseline, candidate, manifests, proof)
         report['review_required'].extend([
             'Inspect final structural and instruction reports, including layout/relocation/data-reference uncertainty.',
             'Final code generation, imported bindings and KAPI/other-component compatibility need human review before any hardware decision.'])
@@ -359,7 +373,7 @@ def summary(report):
     return '\n'.join(lines) + '\n'
 
 
-def main():
+def main(proof_path=None, candidate_policy=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--baseline-build', required=True, type=Path)
     parser.add_argument('--candidate-build', required=True, type=Path)
@@ -375,8 +389,8 @@ def main():
         baseline = args.baseline_build.expanduser().resolve(strict=True)
         candidate = args.candidate_build.expanduser().resolve(strict=True)
         output = new_output(args.output, (baseline, candidate))
-        proof = read_json(HERE / 'proof.json')
-        report = inspect_pair(baseline, candidate, proof)
+        proof = read_json(proof_path or HERE / 'proof.json')
+        report = inspect_pair(baseline, candidate, proof, candidate_policy=candidate_policy)
         if not report['static_rejections']:
             structural = [sys.executable, BASE / 'compare.py', '--reference', baseline / 'NVRM.kext',
                           '--candidate', candidate / 'NVRM.kext', '--output', output / 'structural']
@@ -405,9 +419,9 @@ def main():
                     ('status', 'counts', 'address_dependent_summary', 'metadata_comparison', 'limitations')}
             # Recheck actual source/object hashes after the child tools. Neither
             # child is allowed to modify inputs or this captured evidence.
-            final = inspect_pair(baseline, candidate, proof)
+            final = inspect_pair(baseline, candidate, proof, candidate_policy=candidate_policy)
             keys = ('source_changes', 'input_manifests_sha256', 'evidence_metadata_sha256', 'toolchains', 'compile_record_changes',
-                    'artifacts', 'object_changes', 'archive_changes')
+                    'artifacts', 'object_changes', 'archive_changes', 'candidate_policy_evidence')
             if any(final.get(key) != report.get(key) for key in keys) or final['static_rejections']:
                 report['static_rejections'].append('Input evidence changed or failed validation during the comparison')
         report['status'] = 'rejected' if report['static_rejections'] else 'review_required'

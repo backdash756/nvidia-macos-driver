@@ -1,0 +1,184 @@
+{
+  "allowed_extra_exports": [
+    "_nvkms_yuv420_diag_claim"
+  ],
+  "diagnostic_proof": {
+    "allowed_extra_exports": [
+      "_nvkms_yuv420_diag_claim"
+    ],
+    "baseline_patch_proof_sha256": "00e872d80b778aab0d4ffa39ad66618970728e08b190aa2616541f86536ba876",
+    "diagnostic_patch": {
+      "apply_directory": "src/nvidia-modeset",
+      "path": "kexts/NVRM/patches/615-yuv420-diagnostic.patch",
+      "sha256": "ed9fd700dd6a83b01d552b9148a2dc983e28eb17a8a2379c9b062c0ba13af0c0"
+    },
+    "diagnostic_source_commit": "ff37f3812fe170610885081f3a9cb223eb580938",
+    "expected_changed_objects": [
+      "ogkm/src/nvidia-modeset/_out/Darwin_x86_64/nvkms-kapi.o",
+      "ogkm/src/nvidia-modeset/_out/Darwin_x86_64/nvkms-modepool.o",
+      "glue/os-nvkms-xnu.o"
+    ],
+    "experiment_base_commit": "2e9f435637ff44164ba0355ae8904f15935c2f5a",
+    "followup_patch": {
+      "apply_directory": "src/nvidia-modeset",
+      "parent_commit": "61c581ed679ebec7be9685eecf0bad991671da82",
+      "path": "patches/615-yuv420-trigger-overview.patch",
+      "sha256": "9470404eaa6fcc338c32efb82606010af14fe79aa2e92c7c0826232bccf95aa0",
+      "source_changes": {
+        "ogkm/src/nvidia-modeset/kapi/src/nvkms-kapi.c": {
+          "after_sha256": "d25439b4c3ea42a2e739227b34c1ce12d94c4c6441680bbd7a0774c9c07e1481",
+          "before_sha256": "5fda13a23642a936566ac63dc6e4f32f46481124b8c7e138e0efa31d5872a864"
+        }
+      }
+    },
+    "format": 2,
+    "historical_source_changes": {
+      "nullmoth/kexts/NVRM/os-nvkms-xnu.cpp": {
+        "after_sha256": "ec27b73112ea5e029a2da46ce10953ef72a522dd1e2de319bd678334570ad37d",
+        "before_sha256": "35bbdaa805dc2e727550b30b09d6e0626dc0f2e15779047f5340046279fa4861"
+      },
+      "ogkm/src/nvidia-modeset/kapi/src/nvkms-kapi.c": {
+        "after_sha256": "5fda13a23642a936566ac63dc6e4f32f46481124b8c7e138e0efa31d5872a864",
+        "before_sha256": "ff0f957733b1576ad5ddd6e6c60c33f899c71f0010e52b1c078f90011203ae81"
+      },
+      "ogkm/src/nvidia-modeset/src/nvkms-modepool.c": {
+        "after_sha256": "736c8d3e2ad51c23f1dc0bff1be93d28c4263991a08272a90c8b59936b48cecb",
+        "before_sha256": "c63c1c1414bf54377fef8624aabeaf24fa64bcffad8eeb44ecd47e3efee6f3f7"
+      }
+    },
+    "nullmoth_commit": "46779055f68208baa5ddfb9b2e9c77ed028e1d59",
+    "nvidia_commit": "1a82fbfda8f321b056eb3568850f9316c5e465c5",
+    "patch_order": [
+      "baseline:615-display-completion.patch",
+      "baseline:615-setmode-reason.patch",
+      "baseline:615-viewport-scaling.patch",
+      "baseline:615-backlight-register-log.patch",
+      "baseline:615-timer-callback-clear.patch",
+      "diagnostic:615-yuv420-diagnostic.patch",
+      "diagnostic:xnu-yuv420-hook.patch",
+      "diagnostic:615-yuv420-trigger-overview.patch"
+    ],
+    "reference_recipe_sha256": {
+      "archives.py": "b3043ed407b1bf687c228df2ddadd471fb227d3af7d38adf9908058c2c05f6df",
+      "build.py": "812fc6fd6fb89baa074ab55890066fa8dc5c0ab6d4d8026e56aa73786d067bd7",
+      "compare.py": "15beb750a2a487c74bb56e69c0969f2118e9e08c20905fb1125ce4885029936b",
+      "darwin.mk": "41cb2e4f720dd3b23c90fc5824172c1c0278c1d189881923127ee4eab5080064",
+      "macho.py": "cbdc447332c48114614800ea1f6808d6458fd6faac82112dfc85ffe4c851a82c",
+      "patches/.gitattributes": "7883084e901f32a87fe4157edb4b3ac3f19b7bba97ee6c3658ba4b7455d6f537",
+      "patches/615-backlight-register-log.patch": "913e3961a78398b4263d79ddfbea0b9be533702ddfd9f91bbf6166c706007696",
+      "patches/615-display-completion.patch": "c5e623469c24ddf9cb2b35f9e9536deb77b3df6eb3c0aaf4d9fc6726eff10c4c",
+      "patches/615-setmode-reason.patch": "1683edc47fac3128666862cb232bb7ba97a1e3670a7c17e29c8146b4786466ef",
+      "patches/615-timer-callback-clear.patch": "861481cba5e8da40dcea9d8684a6e6a8bb4bcf4f82b73022caa36a2196581a0b",
+      "patches/615-viewport-scaling.patch": "8abcaf6000df8a85f6c439ba189562d321b29049efd44147562ca2476d58c711",
+      "patches/README.md": "cf60f500360d89a3444ce0b02f11b18d0b783dab2c5e57060668196e071d4a1c",
+      "patches/patch-proof.json": "00e872d80b778aab0d4ffa39ad66618970728e08b190aa2616541f86536ba876",
+      "preflight.py": "afaad853eab654537b305ece94c3799a8a8cb25a39cc2ba72d2bc0b941923eb8"
+    },
+    "source_changes": {
+      "nullmoth/kexts/NVRM/os-nvkms-xnu.cpp": {
+        "after_sha256": "ec27b73112ea5e029a2da46ce10953ef72a522dd1e2de319bd678334570ad37d",
+        "before_sha256": "35bbdaa805dc2e727550b30b09d6e0626dc0f2e15779047f5340046279fa4861"
+      },
+      "ogkm/src/nvidia-modeset/kapi/src/nvkms-kapi.c": {
+        "after_sha256": "d25439b4c3ea42a2e739227b34c1ce12d94c4c6441680bbd7a0774c9c07e1481",
+        "before_sha256": "ff0f957733b1576ad5ddd6e6c60c33f899c71f0010e52b1c078f90011203ae81"
+      },
+      "ogkm/src/nvidia-modeset/src/nvkms-modepool.c": {
+        "after_sha256": "736c8d3e2ad51c23f1dc0bff1be93d28c4263991a08272a90c8b59936b48cecb",
+        "before_sha256": "c63c1c1414bf54377fef8624aabeaf24fa64bcffad8eeb44ecd47e3efee6f3f7"
+      }
+    },
+    "xnu_hook": {
+      "path": "patches/xnu-yuv420-hook.patch",
+      "sha256": "03932ec7af95ba53901d8dca6240bf6af0bc0bebe34caac53b5c038ea6a8def5",
+      "source_path": "kexts/NVRM/os-nvkms-xnu.cpp",
+      "source_sha256": "ec27b73112ea5e029a2da46ce10953ef72a522dd1e2de319bd678334570ad37d"
+    }
+  },
+  "expected_changed_objects": [
+    "ogkm/src/nvidia-modeset/_out/Darwin_x86_64/nvkms-kapi.o",
+    "ogkm/src/nvidia-modeset/_out/Darwin_x86_64/nvkms-modepool.o",
+    "glue/os-nvkms-xnu.o",
+    "glue/NVRM.o"
+  ],
+  "expected_plist_changes": {
+    "CFBundleShortVersionString": {
+      "after": "2.5.4",
+      "before": "0.1"
+    },
+    "CFBundleVersion": {
+      "after": "2.5.4",
+      "before": "0.1"
+    }
+  },
+  "format": 1,
+  "metadata_parent_commit": "e82c6637727af6e839ef9856fc9a4820b92d4fa4",
+  "metadata_patch": {
+    "apply_root": "nullmoth",
+    "path": "patches/254-metadata.patch",
+    "sha256": "89a2318a62e541a1892e0eaca9f7cb58f3451061a702857107491be60a77f07d",
+    "source_changes": {
+      "nullmoth/kexts/NVRM/Info.plist": {
+        "after_sha256": "a1aab09b29d273a491b63458e0f1871eca99ad99d5671e74b7c0e2df23b0fe87",
+        "before_sha256": "934914c01b15ad266fa4ff2f62e03671e2bc6849660564710bbebfc429ac91b6"
+      },
+      "nullmoth/kexts/NVRM/NVRM.cpp": {
+        "after_sha256": "fa7dd5bb17a7b8997f736ac6fb151a627bf80dc8a8894917969ea5fd81980ab1",
+        "before_sha256": "bb16898582cb3cca2cffad4b85f6f8a75a1eb2bb5230ab5d9def1695ed31f9ff"
+      }
+    }
+  },
+  "nullmoth_commit": "46779055f68208baa5ddfb9b2e9c77ed028e1d59",
+  "nvidia_commit": "1a82fbfda8f321b056eb3568850f9316c5e465c5",
+  "patch_order": [
+    "baseline:615-display-completion.patch",
+    "baseline:615-setmode-reason.patch",
+    "baseline:615-viewport-scaling.patch",
+    "baseline:615-backlight-register-log.patch",
+    "baseline:615-timer-callback-clear.patch",
+    "diagnostic:615-yuv420-diagnostic.patch",
+    "diagnostic:xnu-yuv420-hook.patch",
+    "diagnostic:615-yuv420-trigger-overview.patch",
+    "metadata:254-metadata.patch"
+  ],
+  "purpose": "experimental metadata compatibility only; no runtime or hardware approval",
+  "reference_recipe_sha256": {
+    "archives.py": "b3043ed407b1bf687c228df2ddadd471fb227d3af7d38adf9908058c2c05f6df",
+    "build.py": "812fc6fd6fb89baa074ab55890066fa8dc5c0ab6d4d8026e56aa73786d067bd7",
+    "compare.py": "15beb750a2a487c74bb56e69c0969f2118e9e08c20905fb1125ce4885029936b",
+    "darwin.mk": "41cb2e4f720dd3b23c90fc5824172c1c0278c1d189881923127ee4eab5080064",
+    "macho.py": "cbdc447332c48114614800ea1f6808d6458fd6faac82112dfc85ffe4c851a82c",
+    "patches/.gitattributes": "7883084e901f32a87fe4157edb4b3ac3f19b7bba97ee6c3658ba4b7455d6f537",
+    "patches/615-backlight-register-log.patch": "913e3961a78398b4263d79ddfbea0b9be533702ddfd9f91bbf6166c706007696",
+    "patches/615-display-completion.patch": "c5e623469c24ddf9cb2b35f9e9536deb77b3df6eb3c0aaf4d9fc6726eff10c4c",
+    "patches/615-setmode-reason.patch": "1683edc47fac3128666862cb232bb7ba97a1e3670a7c17e29c8146b4786466ef",
+    "patches/615-timer-callback-clear.patch": "861481cba5e8da40dcea9d8684a6e6a8bb4bcf4f82b73022caa36a2196581a0b",
+    "patches/615-viewport-scaling.patch": "8abcaf6000df8a85f6c439ba189562d321b29049efd44147562ca2476d58c711",
+    "patches/README.md": "cf60f500360d89a3444ce0b02f11b18d0b783dab2c5e57060668196e071d4a1c",
+    "patches/patch-proof.json": "00e872d80b778aab0d4ffa39ad66618970728e08b190aa2616541f86536ba876",
+    "preflight.py": "afaad853eab654537b305ece94c3799a8a8cb25a39cc2ba72d2bc0b941923eb8"
+  },
+  "source_changes": {
+    "nullmoth/kexts/NVRM/Info.plist": {
+      "after_sha256": "a1aab09b29d273a491b63458e0f1871eca99ad99d5671e74b7c0e2df23b0fe87",
+      "before_sha256": "934914c01b15ad266fa4ff2f62e03671e2bc6849660564710bbebfc429ac91b6"
+    },
+    "nullmoth/kexts/NVRM/NVRM.cpp": {
+      "after_sha256": "fa7dd5bb17a7b8997f736ac6fb151a627bf80dc8a8894917969ea5fd81980ab1",
+      "before_sha256": "bb16898582cb3cca2cffad4b85f6f8a75a1eb2bb5230ab5d9def1695ed31f9ff"
+    },
+    "nullmoth/kexts/NVRM/os-nvkms-xnu.cpp": {
+      "after_sha256": "ec27b73112ea5e029a2da46ce10953ef72a522dd1e2de319bd678334570ad37d",
+      "before_sha256": "35bbdaa805dc2e727550b30b09d6e0626dc0f2e15779047f5340046279fa4861"
+    },
+    "ogkm/src/nvidia-modeset/kapi/src/nvkms-kapi.c": {
+      "after_sha256": "d25439b4c3ea42a2e739227b34c1ce12d94c4c6441680bbd7a0774c9c07e1481",
+      "before_sha256": "ff0f957733b1576ad5ddd6e6c60c33f899c71f0010e52b1c078f90011203ae81"
+    },
+    "ogkm/src/nvidia-modeset/src/nvkms-modepool.c": {
+      "after_sha256": "736c8d3e2ad51c23f1dc0bff1be93d28c4263991a08272a90c8b59936b48cecb",
+      "before_sha256": "c63c1c1414bf54377fef8624aabeaf24fa64bcffad8eeb44ecd47e3efee6f3f7"
+    }
+  },
+  "version": "2.5.4"
+}

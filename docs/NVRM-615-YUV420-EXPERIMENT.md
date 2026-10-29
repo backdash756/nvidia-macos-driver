@@ -4,6 +4,8 @@ This branch prepares an **experimental diagnostic artifact only**. It neither in
 
 The user reports a successful local `reference-005` build. Its actual binaries and a Darwin build environment are not available in this Linux workspace. Source preparation and regression fixtures here are not a completed macOS build, actual NVRM object comparison or hardware result.
 
+> **Separate metadata variant:** The user reports a successful real macOS `yuv420-diag-002` with exactly three changed objects. [NVRM-615-METADATA-EXPERIMENT.md](NVRM-615-METADATA-EXPERIMENT.md) documents the optional isolated `yuv420-diag-003` technical-version patch and its separate four-object profile. This document and its ordinary entry points retain source metadata `0.1` and the three-object comparison; no existing build is upgraded in place.
+
 ## Pinned inputs and reused implementation
 
 | Input | Revision |

@@ -392,8 +392,12 @@ def main():
     if args.prepared_build:
         prepared = args.prepared_build.resolve(strict=True)
         manifest = json.loads((prepared / 'inputs.json').read_text())
-        assert (manifest['format'], manifest['build_kind'], manifest['diagnostic_enabled']) == (
-            2, 'yuv420-ab-experiment', True), 'Expected a paired experimental source manifest'
+        assert (manifest['format'], manifest['build_kind'], manifest['diagnostic_enabled']) in (
+            (2, 'yuv420-ab-experiment', True),
+            (3, 'yuv420-ab-metadata-experiment', True)), 'Expected a paired experimental source manifest'
+        if manifest['format'] == 3:
+            assert (manifest.get('metadata_enabled') is True and manifest.get('experimental') is True
+                    and manifest.get('metadata_version') == '2.5.4'), 'Expected isolated experimental metadata'
         vendor = prepared / 'ogkm'
         hook_path = prepared / 'nullmoth/kexts/NVRM/os-nvkms-xnu.cpp'
         for folder, key, paths in (

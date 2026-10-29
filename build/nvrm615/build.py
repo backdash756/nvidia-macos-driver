@@ -337,7 +337,7 @@ class Recorder:
         return path.read_text()
 
 
-def build(args, input_loader=None):
+def build(args, input_loader=None, artifact_metadata_version='0.1'):
     if platform.system() != 'Darwin':
         fail('Compilation/linking require macOS; prepare and Linux tests are available here')
     if os.geteuid() == 0:
@@ -348,6 +348,15 @@ def build(args, input_loader=None):
     # The reference CLI retains this default loader and rejects diagnostics.
     out, manifest = (input_loader or load_inputs)(args.output)
     diagnostic_enabled = manifest['diagnostic_enabled']
+    if artifact_metadata_version != '0.1' and (
+            artifact_metadata_version != '2.5.4' or input_loader is None
+            or manifest.get('format') != 3
+            or manifest.get('build_kind') != 'yuv420-ab-metadata-experiment'
+            or manifest.get('diagnostic_enabled') is not True
+            or manifest.get('metadata_enabled') is not True
+            or manifest.get('experimental') is not True
+            or manifest.get('metadata_version') != artifact_metadata_version):
+        fail('A patched artifact version requires the explicit isolated metadata profile')
     if (out / 'build-state.json').exists():
         fail('This is a single-attempt build directory; prepare a fresh output for retries')
     if not 1 <= args.jobs <= 32:
@@ -458,15 +467,16 @@ def build(args, input_loader=None):
     shutil.copyfile(kext / 'Info.plist', candidate / 'Contents/Info.plist')
     record.run([tools['codesign'], '-f', '-s', '-', '--digest-algorithm=sha256', candidate], out, 'codesign')
     record.run([tools['codesign'], '--verify', '--strict', candidate], out, 'codesign-verify')
-    # Reference-only metadata stays 0.1, exactly as in the pinned source.
-    # These artifacts are not an official 2.5.4 package or ready to install.
+    # The default reference/diagnostic metadata stays at the pinned source 0.1.
+    # A separate, strict metadata loader may record its isolated patched version.
+    # These artifacts are not an official package or ready to install.
     verify_hashes(out / 'nullmoth', manifest['nullmoth_sha256'])
     verify_hashes(out / 'ogkm', manifest['vendor_sha256'])
     save(out / 'artifacts.json', {
         'files': {p.relative_to(out).as_posix(): sha(p) for p in sorted(out.rglob('*'))
                   if p.is_file() and (p.suffix in ('.o', '.a') or candidate in p.parents)},
         'reference_sha256': sha(reference / 'Contents/MacOS/NVRM'),
-        'diagnostic_enabled': diagnostic_enabled, 'metadata_version': '0.1',
+        'diagnostic_enabled': diagnostic_enabled, 'metadata_version': artifact_metadata_version,
     })
     compare = [sys.executable, str(HERE / 'compare.py'), '--reference', str(reference),
                '--candidate', str(candidate), '--output', str(out / 'comparison')]
