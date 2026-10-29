@@ -1,0 +1,20 @@
+--- a/kexts/NVRM/os-nvkms-xnu.cpp
++++ b/kexts/NVRM/os-nvkms-xnu.cpp
+@@ -267,7 +267,17 @@
+         if (OSCompareAndSwap(seen, seen | display, &claimed)) return NV_TRUE;
+     }
+ }
+ 
++// Separate opt-in for the production-fix experiment. Exactly one display
++// handle per boot; disabled if the argument is absent or carries multiple bits.
++// Stage 1 is NOT a complete modeset implementation and must not be deployed yet.
++NvBool nvkms_yuv420_fix_enabled(NvU32 display)
++{
++    uint32_t target = 0;
++    return PE_parse_boot_argn("nvyuv420fix", &target, sizeof target) &&
++           target != 0 && !(target & (target - 1)) && target == display;
++}
++
+ static bool gKmsTraceRm = true;
+ void nvkms_call_rm(void *ops)
+ {
