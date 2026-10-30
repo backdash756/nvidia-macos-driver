@@ -39,6 +39,39 @@ def recipe_hashes():
             if p.is_file() and "__pycache__" not in p.parts and p.suffix != ".pyc"}
 
 
+def validate_reference_recipe_pair(reference, recorded):
+    """Allow only the historically pinned metadata-only builder extension.
+
+    A reference-005 recipe was captured before build.py gained the 2.5.4
+    metadata flag. No make flags, build commands, SDK choices or linker options
+    changed. The complete historical/new build.py Git objects are pinned;
+    all *other* reference recipe SHA-256 entries must remain identical.
+    The separate binary comparator still strictly checks normalized compiler
+    commands, toolchains, 1,338 objects, archives, imports, and exports.
+    """
+    bridge = PREP.read_proof()["reference_recipe_bridge"]
+    expected = META.load_proof()["reference_recipe_sha256"]
+    current = BASE.recipe_hashes()
+    if (reference.get("recipe_sha256") != expected or
+            recorded.get("recipe_sha256") != current):
+        fail("reference-005 and new baseline must use exactly pinned historical/current recipes")
+    if (set(current) != set(expected) or
+            any(current[name] != digest for name, digest in expected.items()
+                if name != bridge["only_permitted_recipe_change"])):
+        fail("A reference build recipe other than build.py differs from historical reference-005")
+    historical_file = bridge["historical_commit"] + ":build/nvrm615/build.py"
+    historical_blob = subprocess.check_output([
+        "git", "-C", str(PREP.REPO), "rev-parse", historical_file],
+        text=True).strip()
+    current_blob = subprocess.check_output([
+        "git", "-C", str(PREP.REPO), "hash-object", str(BASE.HERE / "build.py")],
+        text=True).strip()
+    if (historical_blob != bridge["original_build_py_git_blob"] or
+            current_blob != bridge["metadata_aware_build_py_git_blob"]):
+        fail("Reference builder sources do not match exact reviewed historic/current Git blobs")
+    print("OK: old reference-005 and new metadata-aware builder match the pinned recipe bridge")
+
+
 def source_tree_hashes(root):
     """Verify exact tracked-source inventory, excluding compiler's _out only.
 
@@ -176,9 +209,10 @@ def build(args):
     recorded = json.loads((out / "baseline-inputs.json").read_text())
     for key in ("format", "nullmoth_commit", "nvidia_commit",
                 "vendor_sha256", "nullmoth_sha256", "patch_order",
-                "recipe_sha256", "source_date_epoch"):
+                "source_date_epoch"):
         if old.get(key) != recorded.get(key):
-            fail("reference-005 source/build recipe differs: " + key)
+            fail("reference-005 pinned source identity differs: " + key)
+    validate_reference_recipe_pair(old, recorded)
     original = Path(args.reference).expanduser().resolve(strict=True)
     official_sha = BASE.sha(original / "Contents/MacOS/NVRM")
     before_sha = BASE.sha(base / "NVRM.kext/Contents/MacOS/NVRM")
