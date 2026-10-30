@@ -1,0 +1,62 @@
+{
+  "schema": 1,
+  "kind": "yuv420-fix-004",
+  "status": "source-preparation-only",
+  "metadata_version": "2.5.4",
+  "nvidia_commit": "1a82fbfda8f321b056eb3568850f9316c5e465c5",
+  "nullmoth_commit": "46779055f68208baa5ddfb9b2e9c77ed028e1d59",
+  "preserved_inputs": "yuv420-ab-metadata-experiment",
+  "after_metadata_sources": {
+    "ogkm/src/nvidia-modeset/kapi/src/nvkms-kapi.c": "d25439b4c3ea42a2e739227b34c1ce12d94c4c6441680bbd7a0774c9c07e1481",
+    "nullmoth/kexts/NVRM/os-nvkms-xnu.cpp": "ec27b73112ea5e029a2da46ce10953ef72a522dd1e2de319bd678334570ad37d"
+  },
+  "after_fix_sources": {
+    "ogkm/src/nvidia-modeset/kapi/src/nvkms-kapi.c": "ee9684cd21e965ed433134a1f27e5934f3cfaa4ecac71cb1422c169ef00a3481",
+    "nullmoth/kexts/NVRM/os-nvkms-xnu.cpp": "2b1c434507a91c8dffa60f101caf30a326d7711a1f5cc05c4404d5ddbf24ca7b"
+  },
+  "patches": [
+    {
+      "file": "build/nvrm615fix/patches/615-yuv420-fix-discovery.patch",
+      "git_blob_sha": "e3e1bc26ee9a74c3b78185076652ac5d25e8a5fb",
+      "directory": "ogkm",
+      "apply_directory": "src/nvidia-modeset",
+      "files": [
+        "src/nvidia-modeset/kapi/src/nvkms-kapi.c"
+      ]
+    },
+    {
+      "file": "build/nvrm615fix/patches/615-yuv420-fix-validate-setmode.patch",
+      "git_blob_sha": "1d4fc950d7f4cbd3b8636087d71e404d62dc1384",
+      "directory": "ogkm",
+      "apply_directory": "src/nvidia-modeset",
+      "files": [
+        "src/nvidia-modeset/kapi/src/nvkms-kapi.c"
+      ]
+    },
+    {
+      "file": "build/nvrm615fix/patches/xnu-yuv420-fix-optin.patch",
+      "git_blob_sha": "1b80db2e2d31f9e613c14f57f34a445e74fc546b",
+      "directory": "nullmoth",
+      "apply_directory": null,
+      "files": [
+        "kexts/NVRM/os-nvkms-xnu.cpp"
+      ]
+    }
+  ],
+  "changed_source_keys": [
+    "ogkm/src/nvidia-modeset/kapi/src/nvkms-kapi.c",
+    "nullmoth/kexts/NVRM/os-nvkms-xnu.cpp"
+  ],
+  "expected_object_allowlist": [
+    "ogkm/src/nvidia-modeset/_out/Darwin_x86_64/nvkms-kapi.o",
+    "ogkm/src/nvidia-modeset/_out/Darwin_x86_64/nvkms-modepool.o",
+    "glue/os-nvkms-xnu.o",
+    "glue/NVRM.o"
+  ],
+  "allowed_extra_exports": [
+    "_nvkms_yuv420_diag_claim",
+    "_nvkms_yuv420_fix_enabled"
+  ],
+  "runtime_approved": false,
+  "hardware_approved": false
+}
