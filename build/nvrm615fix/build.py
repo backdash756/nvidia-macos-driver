@@ -39,6 +39,18 @@ def recipe_hashes():
             if p.is_file() and "__pycache__" not in p.parts and p.suffix != ".pyc"}
 
 
+def source_tree_hashes(root):
+    """Verify exact tracked-source inventory, excluding compiler's _out only.
+
+    The reference builder writes hundreds of generated artifacts beneath _out
+    while compiling; these are *not* additional staged source files. All other
+    paths remain subject to exact filename + SHA-256 inventory checking.
+    """
+    return {path.relative_to(root).as_posix(): BASE.sha(path)
+            for path in sorted(root.rglob("*"))
+            if path.is_file() and "_out" not in path.relative_to(root).parts}
+
+
 def combined_proof(proof, metadata_proof):
     if (metadata_proof != META.load_proof() or
             proof != PREP.read_proof()):
@@ -136,8 +148,8 @@ def load_inputs(value):
             fail("Changed source scope exceeds the fix proof: " + key)
     for folder, key in (("ogkm", "vendor_sha256"), ("nullmoth", "nullmoth_sha256")):
         BASE.verify_hashes(out / folder, maps[key])
-        if BASE.tree_hashes(out / folder) != maps[key]:
-            fail("Unexpected extra source or header in " + folder)
+        if source_tree_hashes(out / folder) != maps[key]:
+            fail("Unexpected extra source or header outside generated _out in " + folder)
     BASE.verify_hashes(out / "ogkm",
                        json.loads((PREP.REPO / "build/nvrm615/patches/patch-proof.json")
                                   .read_text())["preserved_sources_sha256"])
