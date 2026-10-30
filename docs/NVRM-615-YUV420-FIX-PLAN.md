@@ -1,6 +1,6 @@
 # RTX 5080 / NVIDIA 615 YUV420 production-fix investigation
 
-Status: **stage-1 + stage-2 source patches written; compile, fixed-hash build integration and hardware verification NOT complete**. This branch must **not** be installed, or used to alter EFI. The proposed stage-2 reconstruction has not been compiled or proved safe at runtime. Parent: `experiment/nvrm-615-yuv420-ab`. Preserve the working diagnostic and official NullMoth 2.5.4 rollback.
+Status: **stage-1 + stage-2 patches and source-only fix-004 preparation runner written; binary build integration and hardware verification NOT complete**. This branch must **not** be installed, or used to alter EFI. The proposed stage-2 reconstruction has not been compiled or proved safe at runtime. Parent: `experiment/nvrm-615-yuv420-ab`. Preserve the working diagnostic and official NullMoth 2.5.4 rollback.
 
 ## Implemented source stages 1 and 2 (not deployable)
 
@@ -15,6 +15,24 @@ Two new patches on this branch:
 Static strict hunk simulation verified the initial discovery patches and the subsequent stage-2 KAPI source patch against the pinned original NVIDIA KAPI source after the existing diagnostic and trigger-follow-up patches, and against the existing XNU hook. **This is not a compiler, static link, runtime or hardware test**. The installed NVRM remains `diag-003`. Do not enable `nvyuv420fix` yet. The original diagnostic build runner's pinned source hashes remain intentionally unchanged.
 
 Next: verify stage 2 on the actual macOS diagnostic build tree, then build a dedicated pinned fix runner with additional source-hash transitions and object allowlist; test source and preflight/commit semantics, compile, link, review and compare an isolated binary. No install before review.
+
+## Source preparation: fix-004 (not a binary build)
+
+The new `build/nvrm615fix/prepare.py` reuses the unchanged 615 reference, diagnostic, and **2.5.4 metadata** preparation runners inside a *new* output root. It verifies their original manifests, saves the metadata input manifest and state, checks each proposed fix patch against its pinned Git blob, applies precisely three patches with strict `git apply --check`, verifies the two final SHA-256 source digests observed in the user's Stage-2 test, and compares complete source inventories. It emits a distinct `fix_profile=yuv420-fix-004` provenance record and a source-only state. It **does not** compile, sign or install a kext.
+
+Run as a normal user, only on a clean checkout of this branch:
+
+```sh
+WORK="$HOME/nvrm-work/nvidia-macos-driver-fix"
+git -C "$WORK" pull --ff-only &&
+/usr/bin/python3 "$WORK/build/nvrm615fix/prepare.py" \
+  --vendor "$HOME/nvrm-inputs/open-gpu-615" \
+  --output "$HOME/nvrm-builds/yuv420-fix-004"
+```
+
+A valid result ends in `FIX-004 SOURCE PREPARATION PASSED`. Existing `reference-005`, `yuv420-diag-002`, `yuv420-diag-003`, the official 2.5.4 backup, installed KEXTs, NVRAM and EFI are read-only. A failed fresh preparation is retained for investigation rather than overwritten.
+
+**Build gate remains closed.** Although the prepared manifest retains the exact metadata role/format consumed by the immutable 2.5.4 compiler, it contains a distinct mandatory fix identity and source map that the metadata runner rejects. A separate strict fix `build` entry point, comparator policy, code-review/ABI report and failed-mode tests are required before compiling a new NVRM or proposing a hardware test. Never invoke the old metadata `build` command on the fix output.
 
 ## Real hardware evidence — 2026-10-29
 
