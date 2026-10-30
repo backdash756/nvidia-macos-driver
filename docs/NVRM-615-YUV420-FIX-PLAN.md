@@ -34,6 +34,29 @@ A valid result ends in `FIX-004 SOURCE PREPARATION PASSED`. Existing `reference-
 
 **Build gate remains closed pending the corrected macOS compiler/instruction review.** Although the prepared manifest retains the exact metadata role/format consumed by the immutable 2.5.4 compiler, it contains a distinct mandatory fix identity and source map that the metadata runner rejects. A separate strict fix `build` entry point, comparator policy, code-review/ABI report and failed-mode tests are required before compiling a new NVRM or proposing a hardware test. Never invoke the old metadata `build` command on the fix output.
 
+## Strict historical reference recipe bridge and build-003
+
+The first `build-002` compilation attempt stopped before compilation with `reference-005 source/build recipe differs: recipe_sha256`. The original `reference-005` was created with the metadata-unaware reference builder, whereas `fix-004` needs the later 2.5.4 metadata-aware builder. Source review compared both *complete* `build/nvrm615/build.py` versions: changes are limited to the optional metadata-version parameter, an explicit metadata-only role gate, explanatory comments, and the artifact metadata-version record; the compilation/make/link/sign commands are unchanged. The historical and current Git blobs are pinned in `build/nvrm615fix/proof.json`:
+
+- original `build.py` Git blob: `305a1662314f040a9152cc66665b3d22c0194cdd`
+- metadata-aware `build.py` Git blob: `53fe18b690565b2dffbb36f984a5fd28637d1b7c`
+- historical reference source commit `e82c6637727af6e839ef9856fc9a4820b92d4fa4`
+
+The new `validate_reference_recipe_pair` requires the original `reference-005` manifest's complete historical recipe SHA-256 map, the new baseline's complete current recipe map, exact Git blob identities for `build.py` and **identical hashes for every other recipe file**. The actual binary comparator separately requires identical normalized compiler commands, SDK/toolchains and all unchanged objects. No general bypass for recipe mismatches has been added.
+
+`tools/test_yuv420_fix_recipe_bridge.py` uses existing read-only `reference-005` and `build-002` input manifests to validate the bridge and run three negative/tamper controls. `build-002` is retained as the stopped attempt and is not reused. Since the new build runner and proof changed, a fresh `build-003` is necessary.
+
+```sh
+WORK="$HOME/nvrm-work/nvidia-macos-driver-fix"
+git -C "$WORK" pull --ff-only &&
+/usr/bin/python3 "$WORK/tools/test_yuv420_fix_recipe_bridge.py" &&
+/usr/bin/python3 "$WORK/build/nvrm615fix/build.py" prepare \
+  --vendor "$HOME/nvrm-inputs/open-gpu-615" \
+  --output "$HOME/nvrm-builds/yuv420-fix-004-build-003"
+```
+
+After successful preparation, `build` on this fresh directory is permitted **for isolated compilation and static binary audit only**. Installation, boot argument changes and loading the candidate remain prohibited pending results and human review.
+
 ## Compiler output inventory regression and build-002
 
 Build runner revision `3977fc36` corrects a source-only inventory trap in the candidate policy: after compilation, `src/nvidia-modeset/_out/` and `src/nvidia/_out/` contain generated objects and build evidence. The earlier candidate loader accidentally compared these as source changes and would reject its own completed build. The corrected `source_tree_hashes` function excludes only path components named `_out`, still checking every other source path and full SHA-256 against the pinned manifest; the existing object/archive/compile comparator checks the generated artifacts separately. `tools/test_yuv420_fix_inventory.py` asserts that new generated objects are accepted but extra source files or tampered source hashes are rejected.
