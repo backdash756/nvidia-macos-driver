@@ -1,6 +1,6 @@
 # RTX 5080 / NVIDIA 615 YUV420 production-fix investigation
 
-Status: **stage-1 + stage-2 patches and source-only fix-004 preparation runner written; binary build integration and hardware verification NOT complete**. This branch must **not** be installed, or used to alter EFI. The proposed stage-2 reconstruction has not been compiled or proved safe at runtime. Parent: `experiment/nvrm-615-yuv420-ab`. Preserve the working diagnostic and official NullMoth 2.5.4 rollback.
+Status: **source patches and isolated build/comparison runners written; macOS compilation, binary comparison and hardware verification NOT yet completed**. This branch must **not** be installed, or used to alter EFI. The proposed stage-2 reconstruction has not been compiled or proved safe at runtime. Parent: `experiment/nvrm-615-yuv420-ab`. Preserve the working diagnostic and official NullMoth 2.5.4 rollback.
 
 ## Implemented source stages 1 and 2 (not deployable)
 
@@ -33,6 +33,33 @@ git -C "$WORK" pull --ff-only &&
 A valid result ends in `FIX-004 SOURCE PREPARATION PASSED`. Existing `reference-005`, `yuv420-diag-002`, `yuv420-diag-003`, the official 2.5.4 backup, installed KEXTs, NVRAM and EFI are read-only. A failed fresh preparation is retained for investigation rather than overwritten.
 
 **Build gate remains closed.** Although the prepared manifest retains the exact metadata role/format consumed by the immutable 2.5.4 compiler, it contains a distinct mandatory fix identity and source map that the metadata runner rejects. A separate strict fix `build` entry point, comparator policy, code-review/ABI report and failed-mode tests are required before compiling a new NVRM or proposing a hardware test. Never invoke the old metadata `build` command on the fix output.
+
+## Isolated fix-004 compile/comparison runner (new, untested on macOS)
+
+A separate `build/nvrm615fix/build.py` now offers `prepare` and `build`.
+Its strict loader binds the original complete diagnostic + 2.5.4 metadata provenance, the final two changed source files, exact source SHA-256 values, patch blobs, and an independent `fix_combined_proof`. It reuses the reference compiler's explicit metadata mode without changing the original reference or metadata builder. The candidate will be compared by the independent `build/nvrm615fix/compare.py` with a four-object allowlist, complete 2.5.4 plist, linked KMOD version, archive members, full Mach-O/symbol analysis, instruction audit, and unchanged-objects check.
+
+**Important**: the prior successful `~/nvrm-builds/yuv420-fix-004` is a *source-only snapshot* without the new build-gate manifest. Leave it untouched. The new build runner requires a **fresh** output:
+
+```sh
+WORK="$HOME/nvrm-work/nvidia-macos-driver-fix"
+git -C "$WORK" pull --ff-only &&
+/usr/bin/python3 "$WORK/build/nvrm615fix/build.py" prepare \
+  --vendor "$HOME/nvrm-inputs/open-gpu-615" \
+  --output "$HOME/nvrm-builds/yuv420-fix-004-build-001"
+```
+
+Only after a successful fresh preparation, run the separate `build` command to compile, sign and compare the candidate, **never install it**:
+
+```sh
+/usr/bin/python3 "$WORK/build/nvrm615fix/build.py" build \
+  --output "$HOME/nvrm-builds/yuv420-fix-004-build-001" \
+  --reference "$HOME/nvrm-reference/2.5.4/NVRM.kext" \
+  --baseline-build "$HOME/nvrm-builds/reference-005" \
+  --comparison-output "$HOME/nvrm-audits/yuv420-fix-004-build-001-vs-reference-005"
+```
+
+Expected success is **`FIX-004 BUILD COMPLETED; STATIC REVIEW STILL REQUIRED.`** A compile failure, structural rejection, unexpected changed objects/imports/exports or mismatched KMOD/plist must be treated as a blocker. Do not bypass. Even a green static comparison does *not* authorize copying the candidate to `/Library/Extensions`, rebuilding AuxiliaryKC or enabling `nvyuv420fix`. Inspect evidence and runtime-risk semantics before any controlled test.
 
 ## Real hardware evidence — 2026-10-29
 
