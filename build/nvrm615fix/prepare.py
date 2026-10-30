@@ -56,6 +56,17 @@ def read_proof():
     if proof["allowed_extra_exports"] != [
             "_nvkms_yuv420_diag_claim", "_nvkms_yuv420_fix_enabled"]:
         fail("Unexpected export scope")
+    bridge = proof.get("reference_recipe_bridge")
+    if bridge != {
+            "historical_commit": "e82c6637727af6e839ef9856fc9a4820b92d4fa4",
+            "original_build_py_git_blob": "305a1662314f040a9152cc66665b3d22c0194cdd",
+            "metadata_aware_build_py_git_blob": "53fe18b690565b2dffbb36f984a5fd28637d1b7c",
+            "only_permitted_recipe_change": "build.py",
+            "reason": ("Pinned baseline reference-005 predates exact metadata-only additions to "
+                       "build.py; all remaining reference build recipe source file SHA-256s must "
+                       "match the historical proof. Compiling command lines and generated "
+                       "objects still compared strictly.")}:
+        fail("Unexpected historical reference recipe bridge")
     paths = [
         "build/nvrm615fix/patches/615-yuv420-fix-discovery.patch",
         "build/nvrm615fix/patches/615-yuv420-fix-validate-setmode.patch",
