@@ -32,7 +32,22 @@ git -C "$WORK" pull --ff-only &&
 
 A valid result ends in `FIX-004 SOURCE PREPARATION PASSED`. Existing `reference-005`, `yuv420-diag-002`, `yuv420-diag-003`, the official 2.5.4 backup, installed KEXTs, NVRAM and EFI are read-only. A failed fresh preparation is retained for investigation rather than overwritten.
 
-**Build gate remains closed.** Although the prepared manifest retains the exact metadata role/format consumed by the immutable 2.5.4 compiler, it contains a distinct mandatory fix identity and source map that the metadata runner rejects. A separate strict fix `build` entry point, comparator policy, code-review/ABI report and failed-mode tests are required before compiling a new NVRM or proposing a hardware test. Never invoke the old metadata `build` command on the fix output.
+**Build gate remains closed pending the corrected macOS compiler/instruction review.** Although the prepared manifest retains the exact metadata role/format consumed by the immutable 2.5.4 compiler, it contains a distinct mandatory fix identity and source map that the metadata runner rejects. A separate strict fix `build` entry point, comparator policy, code-review/ABI report and failed-mode tests are required before compiling a new NVRM or proposing a hardware test. Never invoke the old metadata `build` command on the fix output.
+
+## Compiler output inventory regression and build-002
+
+Build runner revision `3977fc36` corrects a source-only inventory trap in the candidate policy: after compilation, `src/nvidia-modeset/_out/` and `src/nvidia/_out/` contain generated objects and build evidence. The earlier candidate loader accidentally compared these as source changes and would reject its own completed build. The corrected `source_tree_hashes` function excludes only path components named `_out`, still checking every other source path and full SHA-256 against the pinned manifest; the existing object/archive/compile comparator checks the generated artifacts separately. `tools/test_yuv420_fix_inventory.py` asserts that new generated objects are accepted but extra source files or tampered source hashes are rejected.
+
+The successful `yuv420-fix-004-build-001` preparation predates this corrected build recipe. **Do not use it for `build` and do not mutate its manifest.** The required next source preparation is a new `yuv420-fix-004-build-002`, using the most recent build runner and test. Only then proceed to a compile attempt.
+
+```sh
+WORK="$HOME/nvrm-work/nvidia-macos-driver-fix"
+git -C "$WORK" pull --ff-only &&
+/usr/bin/python3 "$WORK/tools/test_yuv420_fix_inventory.py" &&
+/usr/bin/python3 "$WORK/build/nvrm615fix/build.py" prepare \
+  --vendor "$HOME/nvrm-inputs/open-gpu-615" \
+  --output "$HOME/nvrm-builds/yuv420-fix-004-build-002"
+```
 
 ## Isolated fix-004 compile/comparison runner (new, untested on macOS)
 
@@ -46,17 +61,17 @@ WORK="$HOME/nvrm-work/nvidia-macos-driver-fix"
 git -C "$WORK" pull --ff-only &&
 /usr/bin/python3 "$WORK/build/nvrm615fix/build.py" prepare \
   --vendor "$HOME/nvrm-inputs/open-gpu-615" \
-  --output "$HOME/nvrm-builds/yuv420-fix-004-build-001"
+  --output "$HOME/nvrm-builds/yuv420-fix-004-build-002"
 ```
 
 Only after a successful fresh preparation, run the separate `build` command to compile, sign and compare the candidate, **never install it**:
 
 ```sh
 /usr/bin/python3 "$WORK/build/nvrm615fix/build.py" build \
-  --output "$HOME/nvrm-builds/yuv420-fix-004-build-001" \
+  --output "$HOME/nvrm-builds/yuv420-fix-004-build-002" \
   --reference "$HOME/nvrm-reference/2.5.4/NVRM.kext" \
   --baseline-build "$HOME/nvrm-builds/reference-005" \
-  --comparison-output "$HOME/nvrm-audits/yuv420-fix-004-build-001-vs-reference-005"
+  --comparison-output "$HOME/nvrm-audits/yuv420-fix-004-build-002-vs-reference-005"
 ```
 
 Expected success is **`FIX-004 BUILD COMPLETED; STATIC REVIEW STILL REQUIRED.`** A compile failure, structural rejection, unexpected changed objects/imports/exports or mismatched KMOD/plist must be treated as a blocker. Do not bypass. Even a green static comparison does *not* authorize copying the candidate to `/Library/Extensions`, rebuilding AuxiliaryKC or enabling `nvyuv420fix`. Inspect evidence and runtime-risk semantics before any controlled test.
