@@ -119,6 +119,20 @@ Pinned vendor source: NVIDIA `open-gpu-kernel-modules` 615.78.08, file `src/nvid
 3. `NvKmsKapiRequestedModeSetConfigToKms` / `KmsSetMode`: ensure the same target+timing gate, internal 420 mode and preference survive the actual set-mode path. Verify with prepare/commit instrumentation before considering productive commit; no global changes to RGB modes or other heads.
 4. XNU hook in `kexts/NVRM/os-nvkms-xnu.cpp`: independent opt-in bootarg, suggested `nvyuv420fix=0x400` for the first test. Parse once; require one GPU, power-of-two display handle, and exact mask match. No use of the diagnostic claim bitmap for activation. Avoid changing published KAPI ABI.
 
+## fix-004 build-003 static evidence and confirmed EDID indices (2026-10-30)
+
+The user's macOS Xcode build `~/nvrm-builds/yuv420-fix-004-build-003/NVRM.kext` compiled, linked, signed and statically compared successfully. Mach-O SHA-256:
+`c73a8b5065e1474a07e6ba7dd66c151266e11b5c9e053f113a22d90a0cf18160`.
+Status: `built_static_review_required` only; the candidate **was not installed, loaded or tested**. The complete 2.5.4 plist and KMOD metadata passed. The 1,338 object inventory contains 1,334 unchanged and precisely the four permitted changed objects; no unexpected imports, missing exports, compiler command changes or static rejections. The two extra global exports are exactly `_nvkms_yuv420_diag_claim` and `_nvkms_yuv420_fix_enabled`.
+
+The full instruction auditor counted 31,147 symbol names: 22,602 identical, 870 different (all with address-reference differences, 869 with referenced-data differences) and 7,675 not safely comparable. Only `_ApplyModeSetConfig`, `_GetDisplayMode` and `_ValidateDisplayMode` showed `instruction_or_encoding_difference`. Newly introduced functions `_Y420FixRestoreValidatedMode` and `_nvkms_yuv420_fix_enabled` have no matching symbol in the reference and are correctly classified as not_comparable, **not** proven equivalent. No ABI or runtime-safety proof follows from this audit.
+
+Archived original diagnostic logs:
+- `yuv420-0x400.log` recorded `dpy=0x400 pass=B`: 4K60 index **3**, 4K59.94 index **12**, both `source=1 valid=1 yuv420=HW`; `COMPLETE queried=61 matches=2`.
+- `yuv420-0x4000.log` recorded `dpy=0x4000 pass=B`: 4K60 index **4**, 4K59.94 index **6**, both `source=1 valid=1 yuv420=HW`; `COMPLETE queried=75 matches=2`.
+
+Therefore the proposed `Y420_FIX_MAX_MODE_INDEX 128` covers both tested EDID enumerations. Revalidate the index if the EDID changes (switch, monitor input, firmware, hotplug). This resolves the previous index-limit uncertainty but **does not prove the physical 4K60 modeset**. The next gate is a controlled runtime/rollback plan and verification of currently installed 2.5.4 components and the user's safe OpenCore boot path. First target: `0x400` only; neither target has been activated with `nvyuv420fix`.
+
 ## Safety and acceptance criteria
 
 - No unsigned/unchecked file moves into `/Library/Extensions`; keep official 2.5.4 and diagnostic snapshots, signed KEXT hashes, AuxiliaryKernelExtensions.kc and KextPolicy history backups.
