@@ -1,0 +1,21 @@
+--- a/kexts/NVRM/os-nvkms-xnu.cpp
++++ b/kexts/NVRM/os-nvkms-xnu.cpp
+@@ -270,11 +270,14 @@
+ 
+-// Separate opt-in for the production-fix experiment. Exactly one display
+-// handle per boot; disabled if the argument is absent or carries multiple bits.
+-// Stage 1 is NOT a complete modeset implementation and must not be deployed yet.
++// Opt-in for the two hardware-tested displays of one GPU.
++// Only 0x400 and 0x4000 are accepted; display handles are boot-local.
++// Preserve the strict opt-in and leave every other display untouched.
+ NvBool nvkms_yuv420_fix_enabled(NvU32 display)
+ {
++    const uint32_t allowed = 0x400U | 0x4000U;
+     uint32_t target = 0;
+     return PE_parse_boot_argn("nvyuv420fix", &target, sizeof target) &&
+-           target != 0 && !(target & (target - 1)) && target == display;
++           target != 0 && (target & ~allowed) == 0 &&
++           (display == 0x400U || display == 0x4000U) &&
++           (target & display) != 0;
+ }
+ 
